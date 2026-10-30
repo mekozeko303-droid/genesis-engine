@@ -1,49 +1,49 @@
 import os
 
 # ==========================================
-# 1. إعدادات تيليجرام (Pyrogram - دعم حتى 2GB)
+# 1. إعدادات تيليجرام (Pyrogram)
 # ==========================================
-TELEGRAM_API_ID = int(os.environ.get("TELEGRAM_API_ID", "31270154"))
-TELEGRAM_API_HASH = os.environ.get("TELEGRAM_API_HASH", "5a056c44d67b3e3318b3f122436cf019")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "PUT_YOUR_BOT_TOKEN_HERE")
+TELEGRAM_API_ID = 31270154
+TELEGRAM_API_HASH = "5a056c44d67b3e3318b3f122436cf019"
+TELEGRAM_BOT_TOKEN = "9093676549:AAEvZHvi_Vr_M65A1oYdmDHRoJtB2LFmlis"
 
 # ==========================================
-# 2. أسطول خوادم كاجل (Kaggle Fleet - 60 ساعة GPU)
+# 2. أسطول خوادم كاجل (Kaggle Fleet)
 # ==========================================
 KAGGLE_FLEET = [
     {
         "id": "kaggle_1",
-        "username": os.environ.get("KAGGLE_USER_1", "zekomeko"),
-        "key": os.environ.get("KAGGLE_KEY_1", "02a28b3f438e7083cb81822896c2952a"),
-        "mins_remaining": 1800  # 30 ساعة أسبوعياً
+        "username": "zekomeko",
+        "key": "02a28b3f438e7083cb81822896c2952a",
+        "mins_remaining": 1800
     },
     {
         "id": "kaggle_2",
-        "username": os.environ.get("KAGGLE_USER_2", "mekozeko303"),
-        "key": os.environ.get("KAGGLE_KEY_2", "16ff7d7940338dacd288a7fceee0b47e"),
-        "mins_remaining": 1800  # 30 ساعة أسبوعياً
+        "username": "mekozeko303",
+        "key": "16ff7d7940338dacd288a7fceee0b47e",
+        "mins_remaining": 1800
     }
 ]
 
 # ==========================================
-# 3. قاعدة البيانات السحابية (Supabase State & Vector RAG)
+# 3. قاعدة البيانات السحابية (Supabase)
 # ==========================================
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://maabijsnlytxewkscvam.supabase.co")
-SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_XMJawz1nsssh9EQ2g3CuzA_SyyhGVLB")
-SUPABASE_SECRET_KEY = os.environ.get("SUPABASE_SECRET_KEY", "sb_secret_c86h0j_iH62neK-xjNMhBA_DNe7RbEw")
+SUPABASE_URL = "https://maabijsnlytxewkscvam.supabase.co"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_XMJawz1nsssh9EQ2g3CuzA_SyyhGVLB"
+SUPABASE_SECRET_KEY = "sb_secret_c86h0j_iH62neK-xjNMhBA_DNe7RbEw"
 
 # ==========================================
 # 4. مفاتيح الذكاء الاصطناعي والنماذج والوسائط
 # ==========================================
-HF_TOKEN = os.environ.get("HF_TOKEN", "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")
+HF_TOKEN = "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"
 
-# دعم التناوب بين مفتاحين لـ Gemini (3000 طلب يومياً)
+# مفتاحان للتناوب (Load Balancing) لتجنب حظر Gemini
 GEMINI_API_KEYS = [
-    os.environ.get("GEMINI_API_KEY_1", "PUT_GEMINI_KEY_1_HERE"),
-    os.environ.get("GEMINI_API_KEY_2", "PUT_GEMINI_KEY_2_HERE")
+    "AIzaSyDDC8V4JzUDqSMm9JRO4xckLF889ftfY6g",
+    "AQ.Ab8RN6ICU0MCQpfvOg4DLdhG2XxNPPp_Fe3vn6kqbkIXsW-e2Q"
 ]
 
-PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "PUT_PIXABAY_KEY_HERE")
+PIXABAY_API_KEY = "58313642-74c3e2c37ac5e866948e83ef1"
 
 # ==========================================
 # 5. إعدادات النظام والأوضاع السبعة
