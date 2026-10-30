@@ -1,34 +1,14 @@
-name: Genesis Studio Engine
+name: Bot
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'
+on: [workflow_dispatch]
 
 jobs:
-  run-studio:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install FFmpeg and System Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-hosny-amiri
-
-      - name: Install Python Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Genesis Hollywood Studio
-        run: |
-          python main.py
+      - run: pip install -r requirements.txt
+      - run: python main.py
