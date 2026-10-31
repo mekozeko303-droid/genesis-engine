@@ -1,0 +1,57 @@
+name: Genesis Immortal Engine 24-7
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 */6 * * *'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  run-genesis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Genesis Immortal Bot
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUB_KEY: ${{ secrets.SUPABASE_PUB_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          KAGGLE_USER_1: ${{ secrets.KAGGLE_USER_1 }}
+          KAGGLE_KEY_1: ${{ secrets.KAGGLE_KEY_1 }}
+          KAGGLE_USER_2: ${{ secrets.KAGGLE_USER_2 }}
+          KAGGLE_KEY_2: ${{ secrets.KAGGLE_KEY_2 }}
+          GEMINI_KEY_1: ${{ secrets.GEMINI_KEY_1 }}
+        run: |
+          python3 main.py
+
+      - name: Persist Memory State to Repo
+        if: always()
+        run: |
+          git config --local user.email "bot@genesis.ai"
+          git config --local user.name "Genesis Auto-Save"
+          git add genesis_persistent_memory.json || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 Auto-sync persistent memory" && git push)
