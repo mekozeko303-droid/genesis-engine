@@ -20,6 +20,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Clean Legacy Conflicting Workflows
+        run: |
+          if [ -f ".github/workflows/run_studio.yml" ]; then
+            git config --local user.email "bot@genesis.ai"
+            git config --local user.name "Genesis Cleaner"
+            git rm -f .github/workflows/run_studio.yml || rm -f .github/workflows/run_studio.yml
+            git commit -m "🧹 Remove legacy conflicting workflow" && git push || true
+          fi
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
