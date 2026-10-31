@@ -39,8 +39,8 @@ HF_TOKEN = "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"
 
 # مفتاحان للتناوب (Load Balancing) لتجنب حظر Gemini
 GEMINI_API_KEYS = [
-    "AIzaSyDDC8V4JzUDqSMm9JRO4xckLF889ftfY6g",
-    "AQ.Ab8RN6ICU0MCQpfvOg4DLdhG2XxNPPp_Fe3vn6kqbkIXsW-e2Q"
+    "AQ.Ab8RN6LgUo-RsNiuvISI1EemwlA0I5eht83u2FKGDoxyoGzcJg",
+    "AQ.Ab8RN6KxKDz4kA_DK_64HlQeWrcv7CQAmlqSazzvc5SGgYtFDQ"
 ]
 
 PIXABAY_API_KEY = "58313642-74c3e2c37ac5e866948e83ef1"
