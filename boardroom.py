@@ -27,7 +27,8 @@ class StudioBoardroom:
 
     async def call_gemini(self, prompt, is_json=False, image_path=None):
         api_key, status = quota_system.get_active_gemini_key()
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        # تم تعديل رقم الإصدار هنا إلى 1.5 ليعمل بنجاح
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         
         parts = [{"text": prompt}]
         if image_path:
@@ -69,7 +70,6 @@ class StudioBoardroom:
         debate_log = []
         kaggle_rem = quota_system.get_total_kaggle_mins()
 
-        # الجولة الأولى: طرح الرؤية من المخرج وطبيب السيناريو ووكيل التسويق
         init_prompt = (
             f"أنتما (1. المخرج) و(2. طبيب السيناريو والخطاف) و(12. وكيل التسويق). "
             f"المطلوب تصميم خطة عمل لـ {num_scenes} مشاهد حول: '{topic}' في وضع '{mode}'. "
@@ -80,7 +80,6 @@ class StudioBoardroom:
         debate_log.append("🎬 **المخرج وطبيب السيناريو:** وضعا المسودة الأولى مع خطاف افتتاحي (Hook) قوي.")
 
         critique = ""
-        # حلقات النقد والتنقيح والوصول للإجماع
         for round_num in range(1, MAX_DEBATE_ROUNDS + 1):
             critique_prompt = (
                 f"اجتماع الغرفة (الجولة {round_num}):\n"
@@ -103,7 +102,6 @@ class StudioBoardroom:
                 draft = await self.call_gemini(rev_prompt)
                 debate_log.append("🔄 **المنتج المنفذ:** أمر بإعادة صياغة المشاهد للوصول للكمال الفني.")
 
-        # إصدار ملف التنفيذ النهائي (JSON) من المنتج المنفذ والمترجم البصري
         final_json_prompt = (
             f"بصفتك المنتج المنفذ (الوكيل 15) والمترجم البصري (الوكيل 7) والمدقق اللغوي (الوكيل 5):\n"
             f"حول المسودة المتفق عليها ({draft}) والنقاش ({critique}) إلى كائن JSON صارم يحتوي على:\n"
@@ -129,9 +127,6 @@ class StudioBoardroom:
         final_blueprint = await self.call_gemini(final_json_prompt, is_json=True)
         return final_blueprint, "\n\n".join(debate_log)
 
-    # ------------------------------------------
-    # وكيل الفحص البصري (Vision QA Agent - رقم 14)
-    # ------------------------------------------
     async def inspect_visual_quality(self, frame_image_path, expected_prompt):
         qa_prompt = (
             f"أنت مفتش الجودة البصري (Vision QA Agent). افحص هذه الصورة المولدة للمشهد: '{expected_prompt}'.\n"
@@ -143,9 +138,6 @@ class StudioBoardroom:
             return res
         return {"passed": True, "action": "keep", "reason": "Default pass"}
 
-    # ------------------------------------------
-    # وكيل المطور للتصحيح الذاتي (Debugger Agent - رقم 15)
-    # ------------------------------------------
     async def self_heal_command(self, failed_cmd, error_message, attempt):
         heal_prompt = (
             f"أنت وكيل المطور (Self-Healing Debugger Agent). تعطل هذا الأمر البرمجي (المحاولة {attempt}/{MAX_SELF_HEAL_RETRIES}):\n"
