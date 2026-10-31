@@ -2,35 +2,36 @@ import os
 import itertools
 
 class Config:
-    # --- 1. إعدادات تيليجرام المعتمدة (تعمل فوراً بدون أخطاء) ---
-    API_ID = int(os.getenv("TELEGRAM_API_ID") or 6)
-    API_HASH = os.getenv("TELEGRAM_API_HASH") or "eb06d4abfb49dc3eeb1aeb98ae0f581e"
-    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8091724654:AAFsjE0G1lJ7N9i2K3vL4mX8pQ5wZ6y1v8s")
+    # --- 1. إعدادات تيليجرام (يجب وضعها في Secrets أو ملف .env) ---
+    # لا تضع المفاتيح هنا مباشرة، اتركها فارغة وسيتم سحبها من الإعدادات
+    API_ID = int(os.getenv("TELEGRAM_API_ID", "0")) 
+    API_HASH = os.getenv("TELEGRAM_API_HASH", "")
+    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-    # --- 2. إعدادات GitHub للتجدد الذاتي 24/7 والبيئة المعزولة (Sandbox) ---
-    GITHUB_TOKEN = os.getenv("GH_TOKEN", "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")
+    # --- 2. إعدادات GitHub ---
+    GITHUB_TOKEN = os.getenv("GH_TOKEN", "")
     GITHUB_REPO = os.getenv("GITHUB_REPO", "mekozeko303-droid/genesis-engine")
     WORKFLOW_FILENAME = "main.yml"
     SANDBOX_BRANCH = "staging-sandbox"
     MAIN_BRANCH = "main"
 
     # --- 3. إعدادات قاعدة البيانات السحابية (Supabase) ---
-    SUPABASE_URL = os.getenv("SUPABASE_URL", "https://maabijsnlytxewkscvam.supabase.co")
-    SUPABASE_PUB_KEY = os.getenv("SUPABASE_PUB_KEY", "sb_publishable_XMJawz1nsssh9EQ2g3CuzA_SyyhGVLB")
-    SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "sb_secret_c86h0j_iH62neK-xjNMhBA_DNe7RbEw")
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    SUPABASE_PUB_KEY = os.getenv("SUPABASE_PUB_KEY", "")
+    SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
 
-    # --- 4. أسطول حسابات Kaggle (توزيع الأحمال 60 ساعة أسبوعياً) ---
+    # --- 4. أسطول حسابات Kaggle ---
     KAGGLE_FLEET = [
         {
             "id": "Node_1",
-            "username": os.getenv("KAGGLE_USER_1", "mekozeko303"),
-            "key": os.getenv("KAGGLE_KEY_1", "6052b08d7dedd1a70dfc09d276ca2dda"),
+            "username": os.getenv("KAGGLE_USER_1", ""),
+            "key": os.getenv("KAGGLE_KEY_1", ""),
             "weekly_quota_hours": 30.0
         },
         {
             "id": "Node_2",
-            "username": os.getenv("KAGGLE_USER_2", "zekomeko"),
-            "key": os.getenv("KAGGLE_KEY_2", "f4f9fd09ecea62b09b6ba5217716d899"),
+            "username": os.getenv("KAGGLE_USER_2", ""),
+            "key": os.getenv("KAGGLE_KEY_2", ""),
             "weekly_quota_hours": 30.0
         }
     ]
@@ -47,7 +48,7 @@ class Config:
     HF_TOKEN = os.getenv("HF_TOKEN", "")
     PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "")
 
-    # --- 6. الأوضاع الـ 17 الإمبراطورية (مع صورة معاينة توضيحية لكل وضع للتذكير) ---
+    # --- 6. الأوضاع الـ 17 (كما هي بدون تغيير) ---
     DEFAULT_MODES = {
         "fast": {
             "name": "⚡ الوضع السريع",
@@ -108,7 +109,7 @@ class Config:
             "engine": "flux_2d",
             "cost_pct": 1.0,
             "style": "Clean 2D stickman animation style, black stick bodies, white round filled expressive faces, colorful background",
-            "desc": "رسوم ستيك مان 2D الشهيرة التي تحصد ملايين المشاهدات في الشروحات والقصص[span_1](start_span)[span_1](end_span).",
+            "desc": "رسوم ستيك مان 2D الشهيرة التي تحصد ملايين المشاهدات في الشروحات والقصص.",
             "preview_url": "https://image.pollinations.ai/prompt/Clean%202D%20stickman%20cartoon%20character%20with%20white%20round%20head%20and%20black%20stick%20body%20in%20forest?width=720&height=480&nologo=true",
             "sample_file_id": ""
         },
@@ -117,7 +118,7 @@ class Config:
             "engine": "flux_anime",
             "cost_pct": 2.0,
             "style": "Studio Ghibli and Makoto Shinkai vibrant anime aesthetic, lush painted clouds, warm lighting",
-            "desc": "تحريك ورسم بأسلوب الأنمي الياباني الدافئ واستوديو جيبلي[span_2](start_span)[span_2](end_span).",
+            "desc": "تحريك ورسم بأسلوب الأنمي الياباني الدافئ واستوديو جيبلي.",
             "preview_url": "https://image.pollinations.ai/prompt/Studio%20Ghibli%20anime%20style%20scenic%20green%20meadow%20and%20dramatic%20clouds?width=720&height=480&nologo=true",
             "sample_file_id": ""
         },
@@ -126,7 +127,7 @@ class Config:
             "engine": "flux_3d",
             "cost_pct": 2.5,
             "style": "Pixar and Disney 3D cute animation style, soft subsurface scattering, vibrant joyful colors",
-            "desc": "أفلام كرتون ثلاثية الأبعاد بأسلوب ديزني وبيكسار بألوان زاهية[span_3](start_span)[span_3](end_span).",
+            "desc": "أفلام كرتون ثلاثية الأبعاد بأسلوب ديزني وبيكسار بألوان زاهية.",
             "preview_url": "https://image.pollinations.ai/prompt/Pixar%20Disney%203d%20cute%20animated%20character%20in%20magical%20forest%20vibrant?width=720&height=480&nologo=true",
             "sample_file_id": ""
         },
@@ -144,7 +145,7 @@ class Config:
             "engine": "hybrid_router",
             "cost_pct": 5.0,
             "style": "Luxury commercial product cinematography, slow-motion macro shots, studio rim lighting",
-            "desc": "إعلانات تجارية فاخرة للمنتجات مع إضاءة استوديو ومؤثرات جذابة[span_4](start_span)[span_4](end_span).",
+            "desc": "إعلانات تجارية فاخرة للمنتجات مع إضاءة استوديو ومؤثرات جذابة.",
             "preview_url": "https://image.pollinations.ai/prompt/Luxury%20perfume%20bottle%20commercial%20product%20shot%20water%20splash%20studio%20lighting?width=720&height=480&nologo=true",
             "sample_file_id": ""
         },
@@ -189,7 +190,7 @@ class Config:
             "engine": "flux_2d",
             "cost_pct": 1.5,
             "style": "Clean modern 2D vector motion graphics illustration, flat minimalist educational style",
-            "desc": "فيديوهات تعليمية وتقنية برسوم توضيحية مبسطة (2D Illustration)[span_5](start_span)[span_5](end_span).",
+            "desc": "فيديوهات تعليمية وتقنية برسوم توضيحية مبسطة (2D Illustration).",
             "preview_url": "https://image.pollinations.ai/prompt/Clean%202D%20vector%20illustration%20educational%20infographic%20design%20minimalist?width=720&height=480&nologo=true",
             "sample_file_id": ""
         },
