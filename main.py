@@ -1,78 +1,66 @@
 import os
+import sys
 import time
 import asyncio
-import threading
-import traceback
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
+from database import db
+from sentinel_evolution import sentinel, SmartCouncil
 
-# ملاحظة هامة: تأكد من وجود ملفاتك (database.py و sentinel_evolution.py)
-# إذا لم تكن موجودة، سيفشل الكود. لهذا وضعتها داخل Try/Except
-try:
-    from database import db
-    from sentinel_evolution import sentinel, SmartCouncil
-except ImportError:
-    print("⚠️ تحذير: ملفات database.py أو sentinel_evolution.py غير موجودة أو بها أخطاء!")
-    exit(1)
+if not Config.BOT_TOKEN:
+    print("❌ خطأ: لم يتم العثور على TELEGRAM_BOT_TOKEN في GitHub Secrets!")
+    sys.exit(1)
 
-# إعدادات البوت مع زيادة عدد العمال لمنع التقطيع
 app = Client(
     "genesis_immortal_bot",
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    workers=100, # مهم جداً لمعالجة الطلبات المتزامنة
-    sleep_threshold=60
+    in_memory=True
 )
 
 START_TIME = time.time()
-USER_STATE = {} # حالة المستخدمين
-# تم حذف PROCESSED_MESSAGES لأنه يسبب Memory Leak، سنعتمد على نظام Pyrogram الداخلي
+PROCESSED_MESSAGES = set()
+USER_STATE = {}
+
 
 def get_main_dashboard(user_id):
     selected_mode = USER_STATE.get(user_id, {}).get("mode", "hybrid")
-    try:
-        modes = db.get_all_modes()
-        m_info = modes.get(selected_mode, modes.get("hybrid", {}))
-        quota = db.get_quota_status()
-    except Exception as e:
-        print(f"DB Error: {e}")
-        return "⚠️ خطأ في الاتصال بقاعدة البيانات. جرب لاحقاً.", None
+    modes = db.get_all_modes()
+    m_info = modes.get(selected_mode, modes["hybrid"])
+    quota = db.get_quota_status()
 
     text = (
-        "👑 **إمبراطورية Genesis Engine الخالدة**\n"
+        "👑 **إمبراطورية Genesis Engine الخالدة (v5.5 Immortal)**\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎯 **الوضع النشط حالياً:** `{m_info.get('name', 'الوضع الافتراضي')}`\n"
+        f"🎯 **الوضع النشط حالياً:** `{m_info['name']}`\n"
         f"📝 **وصف الوضع:** {m_info.get('desc', '')}\n"
-        f"🔋 **رصيد المعالجة المتبقي:** `{quota.get('remaining_pct', 100)}%`\n"
-        f"⏳ **يتجدد الرصيد بعد:** `{quota.get('reset_in', '24 ساعة')}`\n"
-        f"🖥️ **العقدة النشطة:** `{quota.get('active_node', 'Auto')}`\n"
+        f"🔋 **رصيد المعالجة اليومي المتبقي:** `{quota['remaining_pct']}%`\n"
+        f"⏳ **يتجدد الرصيد بالكامل بعد:** `{quota['reset_in']}`\n"
+        f"🖥️ **عقدة كاجل النشطة:** `{quota['active_node']} (60h Fleet)`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "💡 *أرسل فكرة الفيديو مباشرة للبدء، أو اختر من الأزرار:*"
     )
 
     buttons = [
         [
-            InlineKeyboardButton("🎬 تصفح الأوضاع الـ 17+", callback_data="menu_modes_0"),
-            InlineKeyboardButton("📊 تفاصيل الموارد", callback_data="menu_quota")
+            InlineKeyboardButton("🎬 تصفح الأوضاع الـ 17+ (مع الصور)", callback_data="menu_modes_0"),
+            InlineKeyboardButton("📊 تفاصيل الموارد والذاكرة", callback_data="menu_quota")
         ],
         [
-            InlineKeyboardButton("🔬 فحص أداة جديدة", callback_data="menu_eval_news"),
-            InlineKeyboardButton("🧬 استنساخ وضع من فيديو", callback_data="menu_clone_style")
+            InlineKeyboardButton("🔬 فحص خبر / أداة جديدة وتطوير النظام", callback_data="menu_eval_news")
         ],
         [
+            InlineKeyboardButton("🧬 استنساخ وضع جديد من فيديو", callback_data="menu_clone_style"),
             InlineKeyboardButton("🔑 إضافة مفتاح API يدوياً", callback_data="menu_add_key")
         ]
     ]
     return text, InlineKeyboardMarkup(buttons)
 
-def build_modes_keyboard(page=0):
-    try:
-        modes = list(db.get_all_modes().items())
-    except:
-        modes = list(Config.DEFAULT_MODES.items())
 
+def build_modes_keyboard(page=0):
+    modes = list(db.get_all_modes().items())
     per_page = 6
     start = page * per_page
     end = start + per_page
@@ -81,29 +69,84 @@ def build_modes_keyboard(page=0):
     rows = []
     for i in range(0, len(sliced), 2):
         row = []
-        for k, v in sliced[i:i+2]:
-            row.append(InlineKeyboardButton(f"{v['name']} ({v.get('cost_pct', 0)}%)", callback_data=f"setmode_{k}"))
+        for k, v in sliced[i:i + 2]:
+            row.append(InlineKeyboardButton(f"{v['name']} ({v['cost_pct']}%)", callback_data=f"setmode_{k}"))
         rows.append(row)
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"menu_modes_{page-1}"))
+        nav.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"menu_modes_{page - 1}"))
     if end < len(modes):
-        nav.append(InlineKeyboardButton("التالي ➡️", callback_data=f"menu_modes_{page+1}"))
+        nav.append(InlineKeyboardButton("التالي ➡️", callback_data=f"menu_modes_{page + 1}"))
     if nav:
         rows.append(nav)
 
-    rows.append([InlineKeyboardButton("🔙 الرئيسية", callback_data="menu_home")])
+    rows.append([InlineKeyboardButton("🔙 العودة للوحة الرئيسية", callback_data="menu_home")])
     return InlineKeyboardMarkup(rows)
+
+
+async def execute_upgrade_flow(client, chat_id, uid, upg_id, status_message=None):
+    upg = db.get_pending_upgrade(upg_id)
+    if not upg:
+        if status_message:
+            await status_message.edit_text("⚠️ انتهت صلاحية هذا الطلب أو تم تنفيذه مسبقاً.")
+        else:
+            await client.send_message(chat_id, "⚠️ انتهت صلاحية هذا الطلب أو تم تنفيذه مسبقاً.")
+        return
+
+    if upg.get("requires_api_key") and upg.get("key_env_name"):
+        key_name = upg["key_env_name"]
+        if not db.get_api_key(key_name):
+            USER_STATE[uid]["action"] = f"awaiting_upgrade_key_{upg_id}"
+            key_prompt = (
+                f"🔑 **هذه الأداة (`{upg['tool_name']}`) تحتاج مفتاح API لتعمل:**\n\n"
+                f"1️⃣ ادخل على الرابط المباشر التالي لاستخراج المفتاح:\n🔗 {upg.get('signup_url', 'https://huggingface.co/settings/tokens')}\n\n"
+                f"2️⃣ انسخ المفتاح وأرسله لي هنا في المحادثة مباشرة، وسأقوم بحفظه تلقائياً باسم `{key_name}` وإكمال التطوير فوراً!"
+            )
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
+            if status_message:
+                await status_message.edit_text(key_prompt, disable_web_page_preview=True, reply_markup=markup)
+            else:
+                await client.send_message(chat_id, key_prompt, disable_web_page_preview=True, reply_markup=markup)
+            return
+
+    wait_text = f"⏳ **جاري اختبار وتجهيز التطوير (`{upg['tool_name']}`) في البيئة المعزولة (`{Config.SANDBOX_BRANCH}`)...**"
+    if status_message:
+        msg_obj = await status_message.edit_text(wait_text)
+    else:
+        msg_obj = await client.send_message(chat_id, wait_text)
+
+    ok, sandbox_msg = await asyncio.to_thread(
+        sentinel.test_in_sandbox_branch,
+        upg_id,
+        upg["tool_name"],
+        upg.get("integration_code_snippet", "# Verified Plugin\n")
+    )
+    if ok:
+        ok_merge, merge_msg = await asyncio.to_thread(sentinel.merge_sandbox_to_main, upg_id)
+        USER_STATE[uid]["action"] = None
+        await msg_obj.edit_text(
+            f"🧪 **نتيجة البيئة المعزولة:** {sandbox_msg}\n\n"
+            f"🚀 **حالة الدمج النهائي:** {merge_msg}\n\n"
+            "✨ **تمت إضافة التطوير إلى نظامك بنجاح وسيتكيف معه للأبد!**",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+        )
+    else:
+        await msg_obj.edit_text(
+            f"⚠️ **نتيجة فحص البيئة المعزولة:**\n{sandbox_msg}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]])
+        )
+
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message):
+    if message.id in PROCESSED_MESSAGES:
+        return
+    PROCESSED_MESSAGES.add(message.id)
     USER_STATE.setdefault(message.from_user.id, {"mode": "hybrid", "action": None})
     text, markup = get_main_dashboard(message.from_user.id)
-    if markup:
-        await message.reply_text(text, reply_markup=markup)
-    else:
-        await message.reply_text(text)
+    await message.reply_text(text, reply_markup=markup)
+
 
 @app.on_callback_query()
 async def handle_callbacks(client, cq):
@@ -111,256 +154,324 @@ async def handle_callbacks(client, cq):
     data = cq.data
     USER_STATE.setdefault(uid, {"mode": "hybrid", "action": None})
 
-    try:
-        if data == "menu_home":
-            USER_STATE[uid]["action"] = None
-            text, markup = get_main_dashboard(uid)
-            if cq.message.photo or cq.message.video:
-                await cq.message.delete()
-                await client.send_message(uid, text, reply_markup=markup)
-            else:
-                await cq.message.edit_text(text, reply_markup=markup)
-
-        elif data.startswith("menu_modes_"):
-            page = int(data.split("_")[-1])
-            msg_text = f"🎬 **اختر وضع الإنتاج (صفحة {page+1}):**\n*(سيظهر لك مثال بصري للوضع)*"
-            if cq.message.photo or cq.message.video:
-                await cq.message.delete()
-                await client.send_message(uid, msg_text, reply_markup=build_modes_keyboard(page))
-            else:
-                await cq.message.edit_text(msg_text, reply_markup=build_modes_keyboard(page))
-
-        elif data.startswith("setmode_"):
-            mode_key = data.replace("setmode_", "")
-            USER_STATE[uid]["mode"] = mode_key
-            USER_STATE[uid]["action"] = None
-            try:
-                modes = db.get_all_modes()
-                m_info = modes.get(mode_key, modes.get("hybrid"))
-            except:
-                m_info = Config.DEFAULT_MODES.get(mode_key, Config.DEFAULT_MODES["hybrid"])
-
-            caption = (
-                f"✅ **تم تفعيل: {m_info['name']}**\n"
-                "━━━━━━━━━━━━━━━━━━━━━\n"
-                f"📖 **الوصف:**\n{m_info.get('desc', 'إنتاج احترافي.')}\n\n"
-                f"🎨 **البصمة البصرية:**\n`{m_info['style']}`\n\n"
-                f"⚡ **الاستهلاك:** `{m_info['cost_pct']}%` من الحصة\n"
-                "━━━━━━━━━━━━━━━━━━━━━\n"
-                "✍️ **اكتب فكرة الفيديو الآن لبدأ الإنتاج!**"
-            )
-            buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📹 حفظ فيديو تذكيري للوضع", callback_data=f"setsample_{mode_key}")],
-                [InlineKeyboardButton("🔄 تغيير الوضع", callback_data="menu_modes_0"), InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")]
-            ])
-
+    if data == "menu_home":
+        USER_STATE[uid]["action"] = None
+        text, markup = get_main_dashboard(uid)
+        if cq.message.photo or cq.message.video:
             await cq.message.delete()
-            sample_vid = m_info.get("sample_file_id", "")
-            preview_img = m_info.get("preview_url", "")
+            await client.send_message(uid, text, reply_markup=markup)
+        else:
+            await cq.message.edit_text(text, reply_markup=markup)
 
-            try:
-                if sample_vid:
-                    await client.send_video(uid, sample_vid, caption=caption, reply_markup=buttons)
-                elif preview_img:
-                    await client.send_photo(uid, preview_img, caption=caption, reply_markup=buttons)
-                else:
-                    await client.send_message(uid, caption, reply_markup=buttons)
-            except Exception:
+    elif data.startswith("menu_modes_"):
+        page = int(data.split("_")[-1])
+        msg_text = (
+            f"🎬 **اختر وضع الإنتاج المطلوب (صفحة {page + 1}):**\n"
+            "*(عند اختيار أي وضع، ستظهر لك صورة معاينة أو فيديو تذكيري يوضح ستايل هذا الوضع)*"
+        )
+        if cq.message.photo or cq.message.video:
+            await cq.message.delete()
+            await client.send_message(uid, msg_text, reply_markup=build_modes_keyboard(page))
+        else:
+            await cq.message.edit_text(msg_text, reply_markup=build_modes_keyboard(page))
+
+    elif data.startswith("setmode_"):
+        mode_key = data.replace("setmode_", "")
+        USER_STATE[uid]["mode"] = mode_key
+        USER_STATE[uid]["action"] = None
+        modes = db.get_all_modes()
+        m_info = modes.get(mode_key, modes["hybrid"])
+
+        caption = (
+            f"✅ **تم تفعيل: {m_info['name']}**\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📖 **تذكير بنوع الفيديو في هذا الوضع:**\n{m_info.get('desc', 'إنتاج احترافي متكامل.')}\n\n"
+            f"🎨 **البصمة البصرية (Style Prompt):**\n`{m_info['style']}`\n\n"
+            f"⚡ **الاستهلاك لكل مشروع:** `{m_info['cost_pct']}%` من الحصة اليومية\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "✍️ **اكتب الآن فكرة الفيديو مباشرة في المحادثة لنبدأ إنتاجه بهذا النمط!**"
+        )
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📹 حفظ فيديو تذكيري خاص لهذا الوضع", callback_data=f"setsample_{mode_key}")],
+            [
+                InlineKeyboardButton("🔄 تغيير الوضع", callback_data="menu_modes_0"),
+                InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")
+            ]
+        ])
+
+        await cq.message.delete()
+        sample_vid = m_info.get("sample_file_id", "")
+        preview_img = m_info.get("preview_url", "")
+
+        try:
+            if sample_vid:
+                await client.send_video(uid, sample_vid, caption=caption, reply_markup=buttons)
+            elif preview_img:
+                await client.send_photo(uid, preview_img, caption=caption, reply_markup=buttons)
+            else:
                 await client.send_message(uid, caption, reply_markup=buttons)
+        except Exception:
+            await client.send_message(uid, caption, reply_markup=buttons)
 
-        elif data.startswith("setsample_"):
-            mode_key = data.replace("setsample_", "")
-            USER_STATE[uid]["action"] = f"awaiting_sample_vid_{mode_key}"
-            await client.send_message(
-                uid, "📹 **أرسل الآن فيديو قصير لحفظه كمثال:**",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
-            )
+    elif data.startswith("setsample_"):
+        mode_key = data.replace("setsample_", "")
+        USER_STATE[uid]["action"] = f"awaiting_sample_vid_{mode_key}"
+        await client.send_message(
+            uid,
+            "📹 **أرسل الآن مقطع فيديو قصير تريد حفظه كمثال تذكيري لهذا الوضع**، وسيظهر لك دائماً عند فتح هذا الوضع:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
+        )
 
-        elif data == "menu_quota":
-            try:
-                q = db.get_quota_status()
-                lessons = db.get_relevant_lessons()
-            except:
-                q = {"used_pct": 0, "remaining_pct": 100, "reset_in": "24h", "active_node": "None"}
-                lessons = "غير متصل"
-                
-            msg = (
-                "📊 **تقرير الموارد:**\n"
-                "━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔹 **المستهلك:** `{q['used_pct']}%`\n"
-                f"🔹 **المتبقي:** `{q['remaining_pct']}%`\n"
-                f"🔹 **التجديد:** `{q['reset_in']}`\n"
-                f"🔹 **العقدة:** `{q['active_node']}`\n\n"
-                f"🧠 **آخر الدروس:**\n`{lessons}`"
-            )
-            await cq.message.edit_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]]))
+    elif data == "menu_quota":
+        q = db.get_quota_status()
+        lessons = db.get_relevant_lessons()
+        msg = (
+            "📊 **تقرير وكيل الموارد والذاكرة الحية:**\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔹 **المستهلك اليوم:** `{q['used_pct']}%`\n"
+            f"🔹 **المتبقي اليوم:** `{q['remaining_pct']}%`\n"
+            f"🔹 **موعد التجديد القادم:** بعد `{q['reset_in']}`\n"
+            f"🔹 **الحساب النشط:** `{q['active_node']}` (يبدل تلقائياً بين حسابيك)\n\n"
+            f"🧠 **آخر الدروس المتعلمة في الذاكرة:**\n`{lessons}`"
+        )
+        await cq.message.edit_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]]))
 
-        elif data == "menu_eval_news":
-            USER_STATE[uid]["action"] = "awaiting_news"
-            await cq.message.edit_text("🔬 **اكتب اسم الأداة أو الخبر لفحصه:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]]))
+    elif data == "menu_eval_news":
+        USER_STATE[uid]["action"] = "awaiting_news"
+        await cq.message.edit_text(
+            "🔬 **مختبر فحص الأخبار والأدوات والتطوير الذاتي (Truth Sentinel):**\n\n"
+            "اكتب لي الآن أي خبر سمعته أو اسم أداة/نموذج جديد.\n"
+            "سأتحقق منه وأقارنه بما لديك، وأخبرك هل الأفضل إضافته أم لا، ثم أسألك: **هل تريد أن تعمل التحديث أو التطوير؟** وتجيب فقط بـ **نعم** (كتابة أو بالزر) ليتم إضافته فوراً!",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
+        )
 
-        elif data == "menu_clone_style":
-            USER_STATE[uid]["action"] = "awaiting_style_clone"
-            await cq.message.edit_text("🧬 **أرسل فيديو لاستنساخ الستايل:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]]))
+    elif data == "menu_clone_style":
+        USER_STATE[uid]["action"] = "awaiting_style_clone"
+        await cq.message.edit_text(
+            "🧬 **وكيل الهندسة العكسية واستنساخ الأنماط (مع كاشف التكرار):**\n\n"
+            "أرسل لي الآن **فيديو** أعجبك (أو اكتب وصفاً للنمط الذي تريده).\n"
+            "⚠️ *ملاحظة: إذا كان الوضع موجوداً مسبقاً في نظامك، سيرفض النظام إضافته ويخبرك باسم الوضع الموجود عندك!*",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
+        )
 
-        elif data == "menu_add_key":
-            USER_STATE[uid]["action"] = "awaiting_manual_key"
-            await cq.message.edit_text("🔑 **أرسل المفتاح هكذا:** `SERVICE_NAME:YOUR_API_KEY`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]]))
+    elif data == "menu_add_key":
+        USER_STATE[uid]["action"] = "awaiting_manual_key"
+        await cq.message.edit_text(
+            "🔑 **بروتوكول المصادقة وحفظ المفاتيح (API Handshake):**\n\n"
+            "أرسل المفتاح بالصيغة التالية ليتم حفظه في قاعدة البيانات فوراً:\n"
+            "`SERVICE_NAME:YOUR_API_KEY`",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
+        )
 
-        elif data.startswith("sandbox_test_"):
-            upg_id = data.replace("sandbox_test_", "")
-            # (تم اختصار هذه الأجزاء لأنها تعتمد على ملف sentinel_evolution)
-            await cq.message.edit_text("⏳ جاري الاختبار في البيئة المعزولة...")
-            # استدعاء الدالة الخاصة بك
-            # ok, msg = await asyncio.to_thread(sentinel.test_in_sandbox_branch, ...)
-            await cq.message.edit_text("✅ تم الاختبار (أكمل الكود حسب ملفك).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]]))
-
-        elif data.startswith("sandbox_merge_"):
-            await cq.message.edit_text("🚀 جاري الدمج...")
-            # استدعاء دالة الدمج الخاصة بك
-            await cq.message.edit_text("✅ تم الدمج بنجاح!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")]]))
-
-    except Exception as e:
-        print(f"Callback Error: {traceback.format_exc()}")
-        await cq.answer("حدث خطأ غير متوقع، جرب مجدداً.", show_alert=True)
+    elif data.startswith("sandbox_test_"):
+        upg_id = data.replace("sandbox_test_", "")
+        await execute_upgrade_flow(client, cq.message.chat.id, uid, upg_id, status_message=cq.message)
 
 
 @app.on_message((filters.text | filters.video) & filters.private)
 async def handle_user_input(client, message):
+    if message.id in PROCESSED_MESSAGES:
+        return
+    PROCESSED_MESSAGES.add(message.id)
+
     uid = message.from_user.id
     USER_STATE.setdefault(uid, {"mode": "hybrid", "action": None})
     action = USER_STATE[uid].get("action")
     text = (message.text or message.caption or "").strip()
 
-    try:
-        # 0. حفظ فيديو تذكيري
-        if action and action.startswith("awaiting_sample_vid_"):
-            mode_key = action.replace("awaiting_sample_vid_", "")
+    # 0. إذا قال المستخدم "نعم" لتأكيد التحديث أو التطوير
+    if action and action.startswith("confirm_upgrade_"):
+        upg_id = action.replace("confirm_upgrade_", "")
+        if text in ["نعم", "ايوه", "أيوه", "موافق", "ايه", "اضفه", "تحديث", "طوره", "yes", "ok"]:
+            await execute_upgrade_flow(client, message.chat.id, uid, upg_id)
+            return
+        elif text in ["لا", "الغي", "إلغاء", "رفض", "no"]:
             USER_STATE[uid]["action"] = None
-            if message.video:
-                db.set_mode_sample_video(mode_key, message.video.file_id)
-                await message.reply_text("✅ **تم حفظ الفيديو!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 عرض الوضع", callback_data=f"setmode_{mode_key}")]]))
-            else:
-                await message.reply_text("⚠️ يرجى إرسال فيديو صالح.")
+            db.remove_pending_upgrade(upg_id)
+            await message.reply_text("❌ تم إلغاء التحديث بناءً على طلبك.")
             return
 
-        # 1. استنساخ نمط جديد
-        if action == "awaiting_style_clone" or (message.video and not action):
-            USER_STATE[uid]["action"] = None
-            wait_msg = await message.reply_text("🔍 **جاري تحليل النمط وفحص التكرار...**")
-            style_data = await asyncio.to_thread(sentinel.reverse_engineer_video_style, text or "Viral dynamic video")
+    # 1. حفظ فيديو تذكيري لوضع معين
+    if action and action.startswith("awaiting_sample_vid_"):
+        mode_key = action.replace("awaiting_sample_vid_", "")
+        USER_STATE[uid]["action"] = None
+        if message.video:
+            db.set_mode_sample_video(mode_key, message.video.file_id)
+            await message.reply_text(
+                "✅ **تم حفظ الفيديو التذكيري لهذا الوضع بنجاح!** سيظهر لك دائماً عند اختيار هذا الوضع.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 عرض الوضع الآن", callback_data=f"setmode_{mode_key}")]])
+            )
+        else:
+            await message.reply_text("⚠️ يرجى إرسال ملف فيديو صالح.")
+        return
 
-            if style_data.get("is_duplicate"):
-                await wait_msg.edit_text(f"⛔ **مرفوض: النمط موجود مسبقاً!**\n📌 الوضع: `{style_data.get('matched_mode_name', '')}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 الأوضاع", callback_data="menu_modes_0")]]))
-                return
+    # 2. استنساخ نمط جديد مع فحص التكرار الصارم
+    if action == "awaiting_style_clone" or message.video:
+        USER_STATE[uid]["action"] = None
+        wait_msg = await message.reply_text("🔍 **جاري تحليل النمط وفحص جميع الأوضاع للتأكد من عدم وجوده مسبقاً...**")
+        style_data = await asyncio.to_thread(sentinel.reverse_engineer_video_style, text or "Viral dynamic cinematic video")
 
-            sample_fid = message.video.file_id if message.video else ""
-            added_ok, result_mode = db.add_dynamic_mode(style_data["mode_id"], style_data["arabic_name"], style_data["style_prompt"], desc=style_data.get("desc", ""), sample_file_id=sample_fid)
-
-            if not added_ok:
-                await wait_msg.edit_text(f"⛔ **مرفوض: النمط يتطابق مع وضع موجود!**\n🏷️ الوضع: `{result_mode['name']}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 الأوضاع", callback_data="menu_modes_0")]]))
-                return
-
-            USER_STATE[uid]["mode"] = style_data["mode_id"]
-            await wait_msg.edit_text(f"✅ **تم الاستنساخ والإضافة!**\n🏷️ **الاسم:** `{result_mode['name']}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👁️ معاينة", callback_data=f"setmode_{style_data['mode_id']}")]]))
+        if style_data.get("is_duplicate"):
+            await wait_msg.edit_text(
+                f"⛔ **تم رفض الطلب: هذا الوضع موجود لديك مسبقاً!**\n\n"
+                f"📌 **الوضع المطابق في نظامك:** `{style_data.get('matched_mode_name', 'وضع حالي')}`\n"
+                "لا يمكن إضافة أوضاع مكررة للحفاظ على ترتيب النظام.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 فتح قائمة الأوضاع", callback_data="menu_modes_0")]])
+            )
             return
 
-        # 2. فحص خبر
-        if action == "awaiting_news":
-            USER_STATE[uid]["action"] = None
-            wait_msg = await message.reply_text("🛰️ **جاري فحص الخبر...**")
-            report = await asyncio.to_thread(sentinel.evaluate_user_news, text)
-
-            if report.get("verdict") == "ALREADY_HAVE":
-                await wait_msg.edit_text(f"⛔ **موجود لديك مسبقاً!**\n📊 {report.get('comparison_ar')}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")]]))
-                return
-
-            upg_id = f"upg_{int(time.time()) % 100000}"
-            db.save_pending_upgrade(upg_id, report)
-            v_text = "🟢 إضافة حقيقية" if report.get("verdict") == "BETTER" else "🔴 دعاية مبالغ فيها"
-            
-            reply = f"🔬 **التقرير:** `{report.get('tool_name')}`\n⚖️ **الحكم:** {v_text}\n📊 {report.get('comparison_ar')}\n\nهل نختبرها؟"
-            buttons = [[InlineKeyboardButton("🧪 نعم، اختبرها", callback_data=f"sandbox_test_{upg_id}")], [InlineKeyboardButton("❌ لا", callback_data="menu_home")]]
-            await wait_msg.edit_text(reply, reply_markup=InlineKeyboardMarkup(buttons))
-            return
-
-        # 3. مفتاح ترقية
-        if action and action.startswith("awaiting_upgrade_key_"):
-            upg_id = action.replace("awaiting_upgrade_key_", "")
-            USER_STATE[uid]["action"] = None
-            upg = db.get_pending_upgrade(upg_id)
-            if upg:
-                db.save_api_key(upg.get("key_env_name", "CUSTOM_KEY"), text)
-                await message.reply_text("✅ **تم حفظ المفتاح!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🧪 بدء الاختبار", callback_data=f"sandbox_test_{upg_id}")]]))
-            return
-
-        # 4. مفتاح يدوي
-        if action == "awaiting_manual_key":
-            USER_STATE[uid]["action"] = None
-            if ":" in text:
-                k_name, k_val = text.split(":", 1)
-                db.save_api_key(k_name.strip(), k_val.strip())
-                await message.reply_text(f"✅ **تم حفظ `{k_name.strip()}`!**")
-            else:
-                await message.reply_text("⚠️ الصيغة: `NAME:KEY`")
-            return
-
-        # 5. الإنتاج الفعلي
-        mode_key = USER_STATE[uid].get("mode", "hybrid")
-        try:
-            modes = db.get_all_modes()
-            m_info = modes.get(mode_key, modes.get("hybrid"))
-            quota_before = db.get_quota_status()
-        except:
-            m_info = Config.DEFAULT_MODES.get(mode_key, Config.DEFAULT_MODES["hybrid"])
-            quota_before = {"remaining_pct": 100, "active_node": "Fallback"}
-
-        if quota_before.get("remaining_pct", 100) < m_info.get("cost_pct", 10):
-            await message.reply_text(f"⚠️ **الرصيد لا يكفي!**\nالمتبقي: `{quota_before.get('remaining_pct')}%`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")]]))
-            return
-
-        status_msg = await message.reply_text(f"🎬 **بدأ الإنتاج:** `{m_info['name']}`\n⏳ *جاري بناء السيناريو...*")
-
-        try:
-            learned_rules = db.get_relevant_lessons()
-        except:
-            learned_rules = "لا توجد دروس سابقة."
-            
-        director_prompt = f"أنت المخرج الذكي. الفكرة: {text}\nالنمط: {m_info['style']}\nالدروس: {learned_rules}\nاكتب خطة إنتاج سينمائية من 3 مشاهد مع البرومبت الإنجليزي."
-        
-        # توليد الخطة
-        plan = await asyncio.to_thread(SmartCouncil.ask, "أنت مخرج سينمائي.", director_prompt, False)
-        
-        # خصم الرصيد فقط بعد النجاح
-        try:
-            quota_after = db.consume_quota(m_info["cost_pct"])
-            q_text = f"🔋 **المتبقي:** `{quota_after.get('remaining_pct')}%`"
-        except:
-            q_text = "🔋 **تم الخصم بنجاح.**"
-
-        await status_msg.edit_text(
-            f"✅ **اكتمل التخطيط!**\n━━━━━━━━━━━━━━━━━━━━━\n{plan[:3500]}\n━━━━━━━━━━━━━━━━━━━━━\n{q_text}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")]])
+        sample_fid = message.video.file_id if message.video else ""
+        added_ok, result_mode = db.add_dynamic_mode(
+            style_data["mode_id"],
+            style_data["arabic_name"],
+            style_data["style_prompt"],
+            desc=style_data.get("desc", "نمط مستنسخ بالذكاء الاصطناعي"),
+            sample_file_id=sample_fid
         )
 
-    except Exception as e:
-        print(f"Message Error: {traceback.format_exc()}")
-        await message.reply_text("⚠️ حدث خطأ أثناء المعالجة. تم تسجيله في السيرفر.")
+        if not added_ok:
+            await wait_msg.edit_text(
+                f"⛔ **تم رفض الطلب: هذا النمط موجود مسبقاً في نظامك!**\n\n"
+                f"🏷️ **الوضع الموجود:** `{result_mode['name']}`\n"
+                f"📖 **وصفه:** {result_mode.get('desc', '')}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 الذهاب للأوضاع", callback_data="menu_modes_0")]])
+            )
+            return
 
-# --- دالة البقاء حياً (Watchdog) ---
-def run_watchdog():
-    # GitHub Actions يغلق السيرفر بعد 6 ساعات (360 دقيقة).
-    # سنجعله يغلق نفسه في الدقيقة 345 (5 ساعات و45 دقيقة) ليعيد GitHub تشغيله تلقائياً.
-    time.sleep(345 * 60) 
-    print("⏰ حان وقت التجديد التلقائي (Watchdog).")
-    os._exit(0)
+        USER_STATE[uid]["mode"] = style_data["mode_id"]
+        await wait_msg.edit_text(
+            f"✅ **تم استنساخ النمط الجديد وإضافته لنظامك للأبد!**\n\n"
+            f"🏷️ **اسم الوضع الجديد:** `{result_mode['name']}`\n"
+            f"📖 **الوصف:** {result_mode['desc']}\n"
+            f"🎨 **الكود البصري المستخرج:**\n`{result_mode['style']}`",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👁️ معاينة الوضع الجديد", callback_data=f"setmode_{style_data['mode_id']}")]])
+        )
+        return
+
+    # 3. فحص خبر أو أداة جديدة
+    if action == "awaiting_news":
+        wait_msg = await message.reply_text("🛰️ **جاري التحقق من الخبر ومقارنته مع إمكانيات نظامك الحالية...**")
+        report = await asyncio.to_thread(sentinel.evaluate_user_news, text)
+
+        if report.get("verdict") == "ALREADY_HAVE":
+            USER_STATE[uid]["action"] = None
+            await wait_msg.edit_text(
+                f"⛔ **تقرير الفحص: هذه الميزة/الأداة (`{report.get('tool_name')}`) موجودة في نظامك مسبقاً!**\n\n"
+                f"📊 **التفاصيل:**\n{report.get('comparison_ar')}\n\n"
+                "تم رفض الإضافة لمنع التكرار.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+            )
+            return
+
+        upg_id = f"upg_{int(time.time()) % 100000}"
+        db.save_pending_upgrade(upg_id, report)
+        USER_STATE[uid]["action"] = f"confirm_upgrade_{upg_id}"
+
+        verdict_map = {
+            "BETTER": "🟢 **نعم، هذه الأداة أفضل وتستحق الإضافة لتطوير النظام**",
+            "FAKE_HYPE": "🔴 **لا أنصح بها (دعاية فقط أو غير متاحة مجاناً)**"
+        }
+        v_text = verdict_map.get(report.get("verdict"), "🟢 **متاحة وقابلة للإضافة**")
+
+        reply = (
+            f"🔬 **تقرير المقارنة والفحص حول: `{report.get('tool_name')}`**\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚖️ **الرأي الهندسي (الأفضل لك):** {v_text}\n\n"
+            f"📊 **المقارنة التفصيلية:**\n{report.get('comparison_ar')}\n\n"
+            f"🔑 **هل تحتاج مفتاح API؟** `{'نعم (سأجلب لك الرابط تلقائياً)' if report.get('requires_api_key') else 'لا (تعمل مجاناً مباشرة)'}`\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "❓ **هل تريد أن تعمل التحديث أو التطوير؟**\n"
+            "*(فقط اكتب **نعم** في المحادثة أو اضغط على زر الموافقة بالأسفل ليتم إضافتها تلقائياً)*"
+        )
+        buttons = [
+            [InlineKeyboardButton("✅ نعم، اعمل التحديث والتطوير", callback_data=f"sandbox_test_{upg_id}")],
+            [InlineKeyboardButton("❌ لا، إلغاء", callback_data="menu_home")]
+        ]
+        await wait_msg.edit_text(reply, reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    # 4. استقبال مفتاح API لترقية معلقة وإضافته تلقائياً
+    if action and action.startswith("awaiting_upgrade_key_"):
+        upg_id = action.replace("awaiting_upgrade_key_", "")
+        USER_STATE[uid]["action"] = None
+        upg = db.get_pending_upgrade(upg_id)
+        if upg:
+            key_name = upg.get("key_env_name", "CUSTOM_API_KEY")
+            db.save_api_key(key_name, text)
+            await message.reply_text(f"✅ **تم حفظ المفتاح `{key_name}` تلقائياً! جاري إكمال التحديث الآن...**")
+            await execute_upgrade_flow(client, message.chat.id, uid, upg_id)
+        return
+
+    # 5. استقبال مفتاح API يدوي
+    if action == "awaiting_manual_key":
+        USER_STATE[uid]["action"] = None
+        if ":" in text:
+            k_name, k_val = text.split(":", 1)
+            db.save_api_key(k_name.strip(), k_val.strip())
+            await message.reply_text(f"✅ **تم حفظ المفتاح `{k_name.strip()}` بنجاح في الذاكرة الدائمة!**")
+        else:
+            await message.reply_text("⚠️ الصيغة غير صحيحة. أرسله هكذا: `NAME:KEY`")
+        return
+
+    # 6. الإنتاج الفعلي حسب الوضع المختار
+    mode_key = USER_STATE[uid].get("mode", "hybrid")
+    modes = db.get_all_modes()
+    m_info = modes.get(mode_key, modes["hybrid"])
+    quota_before = db.get_quota_status()
+
+    if quota_before["remaining_pct"] < m_info["cost_pct"]:
+        await message.reply_text(
+            f"⚠️ **رصيد اليوم ({quota_before['remaining_pct']}%) لا يكفي لهذا الوضع ({m_info['cost_pct']}%).**\n"
+            f"⏳ سيتجدد الرصيد بالكامل بعد: `{quota_before['reset_in']}`، أو اختر الوضع السريع/الستيك مان."
+        )
+        return
+
+    status_msg = await message.reply_text(
+        f"🎬 **بدأ مجلس الوكلاء العمل على مشروعك!**\n"
+        f"▪️ **الوضع:** `{m_info['name']}`\n"
+        f"▪️ **الاستهلاك المقدر:** `{m_info['cost_pct']}%` من الحصة اليومية\n"
+        f"▪️ **العقدة النشطة:** `{quota_before['active_node']}`\n"
+        "⏳ *جاري تطبيق الدروس السابقة وبناء السيناريو وتوزيع المشاهد...*"
+    )
+
+    learned_rules = db.get_relevant_lessons()
+    director_prompt = (
+        f"أنت المخرج الذكي الشامل. الفكرة: {text}\n"
+        f"النمط المطلوب: {m_info['style']}\n"
+        f"قواعد التعلم السابقة التي يجب الالتزام بها: {learned_rules}\n"
+        "اكتب خطة إنتاج سينمائية مفصلة من 3 مشاهد مع تحديد المحرك لكل مشهد (Hero Shot على Kaggle أو Fast Shot) وبرومبت إنجليزي دقيق."
+    )
+    plan = await asyncio.to_thread(SmartCouncil.ask, "أنت مخرج سينمائي محترف.", director_prompt, False)
+    quota_after = db.consume_quota(m_info["cost_pct"])
+
+    await status_msg.edit_text(
+        f"✅ **اكتمل التخطيط والتوجيه الهندسي للمشروع!**\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{plan[:3000]}\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔋 **الحصة المتبقية لك اليوم:** `{quota_after['remaining_pct']}%` (تتجدد بعد `{quota_after['reset_in']}`)",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+    )
+
+
+async def immortal_lifecycle_watchdog():
+    while True:
+        await asyncio.sleep(60)
+        elapsed_minutes = (time.time() - START_TIME) / 60.0
+        if elapsed_minutes >= 345:
+            sentinel.trigger_self_respawn()
+            await asyncio.sleep(10)
+            os._exit(0)
+
+
+async def start_genesis():
+    print("🚀 Starting Genesis Immortal Engine v5.5...")
+    await app.start()
+    asyncio.create_task(immortal_lifecycle_watchdog())
+    print("✅ Bot is online and listening 24/7 on Telegram!")
+    await idle()
+    await app.stop()
+
 
 if __name__ == "__main__":
-    print("🚀 Genesis Engine is running...")
-    
-    # تشغيل المؤقت في الخلفية
-    watchdog_thread = threading.Thread(target=run_watchdog, daemon=True)
-    watchdog_thread.start()
-    
-    # تشغيل البوت
-    app.run()
+    app.run(start_genesis())
