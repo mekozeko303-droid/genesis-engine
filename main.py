@@ -1,31 +1,50 @@
 import os
 import asyncio
+
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 from pyrogram import Client, filters
 from pyrogram.types import (
     ReplyKeyboardMarkup,
     InlineKeyboardMarkup,
     InlineKeyboardButton
 )
-from config import (
-    TELEGRAM_API_ID,
-    TELEGRAM_API_HASH,
-    TELEGRAM_BOT_TOKEN,
-    PRODUCTION_MODES,
-    SUPPORTED_LANGUAGES,
-    AUTHORIZED_USERS
-)
+import config
 from quota_manager import quota_system
 from boardroom import boardroom
-from media_engine import media_engine
+from media_engine import media_engine, SUPPORTED_LANGUAGES
+
+TELEGRAM_API_ID = getattr(config, "TELEGRAM_API_ID", 31270154)
+TELEGRAM_API_HASH = getattr(config, "TELEGRAM_API_HASH", "")
+TELEGRAM_BOT_TOKEN = getattr(config, "TELEGRAM_BOT_TOKEN", "")
+AUTHORIZED_USERS = getattr(config, "AUTHORIZED_USERS", [])
+
+DEFAULT_MODES = {
+    "cinematic": "🎬 سينمائي 100% (هوليوود واقعي)",
+    "hybrid": "🧠 المخرج الذكي (هجين ديناميكي)",
+    "kids": "👶 كرتون وأنيميشن 3D (Pixar)",
+    "story": "📸 ستوري وريلز صوري (بدون تشويه)",
+    "dialogue": "🗣️ حوار تمثيلي (رجل وامرأة)",
+    "news": "📰 استوديو الأخبار والوثائقيات",
+    "fast": "⚡ الوضع السريع (إنتاج خاطف)",
+    "ads": "📢 مدير الإعلانات التجارية",
+    "cloning": "🧬 استنساخ الوجه والصوت"
+}
+PRODUCTION_MODES = {**DEFAULT_MODES, **getattr(config, "PRODUCTION_MODES", {})}
 
 app = Client(
     "genesis_studio_bot",
     api_id=TELEGRAM_API_ID,
     api_hash=TELEGRAM_API_HASH,
-    bot_token=TELEGRAM_BOT_TOKEN
+    bot_token=TELEGRAM_BOT_TOKEN,
+    in_memory=True
 )
 
 user_sessions = {}
+
 
 def get_session(chat_id):
     if chat_id not in user_sessions:
@@ -41,6 +60,7 @@ def get_session(chat_id):
         }
     return user_sessions[chat_id]
 
+
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
         [
@@ -54,6 +74,7 @@ def get_main_keyboard():
         resize_keyboard=True
     )
 
+
 @app.on_message(filters.command("start"))
 async def start_handler(client, message):
     chat_id = message.chat.id
@@ -63,7 +84,7 @@ async def start_handler(client, message):
 
     sess = get_session(chat_id)
     kaggle_mins = quota_system.get_total_kaggle_mins()
-    lang_name = SUPPORTED_LANGUAGES[sess["lang"]]["name"]
+    lang_name = SUPPORTED_LANGUAGES.get(sess["lang"], SUPPORTED_LANGUAGES["ar"])["name"]
     mode_name = PRODUCTION_MODES.get(sess["mode"], sess["mode"])
 
     welcome = (
@@ -75,6 +96,7 @@ async def start_handler(client, message):
         f"👇 **اختر وضع الإنتاج أو أرسل فكرتك مباشرة للبدء:**"
     )
     await message.reply_text(welcome, reply_markup=get_main_keyboard())
+
 
 @app.on_callback_query()
 async def callback_handler(client, query):
@@ -120,13 +142,13 @@ async def callback_handler(client, query):
         else:
             await query.message.edit_text("⚠️ حدث خطأ أثناء دمج الصور، تأكد من إرسال صور صالحة.")
 
+
 @app.on_message(filters.photo | filters.video | filters.voice | filters.audio)
 async def media_upload_handler(client, message):
     chat_id = message.chat.id
     sess = get_session(chat_id)
     os.makedirs("workspace", exist_ok=True)
 
-    # 1. إذا كان المستخدم في وضع الستوري الشخصي
     if sess["mode"] == "story":
         if message.photo:
             p_path = await message.download(file_name=f"workspace/user_story_{chat_id}_{len(sess['story_photos'])+1}.jpg")
@@ -149,7 +171,6 @@ async def media_upload_handler(client, message):
             await message.reply_text("🎙️ **تم حفظ صوتك الشخصي للستوري!** اضغط الزر أدناه لدمجه مع صورك:", reply_markup=kb)
             return
 
-    # 2. إذا كان المستخدم في وضع استنساخ الوجه والصوت
     if message.photo:
         f_path = await message.download(file_name=f"workspace/user_face_{chat_id}.jpg")
         sess["clone_face"] = f_path
@@ -177,13 +198,13 @@ async def media_upload_handler(client, message):
         else:
             await message.reply_text("📹 تم استلام الفيديو! أرسل الآن **صورتك الشخصية** ليتم دمجها عليه.")
 
+
 @app.on_message(filters.text)
 async def text_handler(client, message):
     chat_id = message.chat.id
     text = message.text.strip()
     sess = get_session(chat_id)
 
-    # أزرار تغيير الأوضاع
     mode_buttons = {
         "🎬 سينمائي 100%": "cinematic",
         "🧠 المخرج الذكي (هجين)": "hybrid",
@@ -214,13 +235,12 @@ async def text_handler(client, message):
             )
         else:
             await message.reply_text(
-                f"🎯 **تم تفعيل وضع:** `{PRODUCTION_MODES[sess['mode']]}`\n"
-                f"🌐 **اللغة الحالية:** `{SUPPORTED_LANGUAGES[sess['lang']]['name']}`\n\n"
+                f"🎯 **تم تفعيل وضع:** `{PRODUCTION_MODES.get(sess['mode'], sess['mode'])}`\n"
+                f"🌐 **اللغة الحالية:** `{SUPPORTED_LANGUAGES.get(sess['lang'], SUPPORTED_LANGUAGES['ar'])['name']}`\n\n"
                 f"أرسل الآن فكرة الفيلم (ويمكنك تحديد عدد المشاهد مثل: *5 مشاهد عن...*) لتبدأ طاولة الـ 20 وكيلاً!"
             )
         return
 
-    # زر اختيار اللغة والصوت البشري
     if text == "🌐 اللغة والصوت البشري":
         buttons = []
         for code, info in SUPPORTED_LANGUAGES.items():
@@ -231,7 +251,6 @@ async def text_handler(client, message):
         )
         return
 
-    # زر فحص الترقيات الذاتي
     if text == "💡 فحص ترقيات النظام":
         wait_u = await message.reply_text("🔍 **يقوم الوكلاء الـ 20 الآن بمسح ودراسة أحدث الترقيات المجانية المتاحة...**")
         report = await boardroom.run_upgrade_research()
@@ -241,7 +260,6 @@ async def text_handler(client, message):
         await wait_u.edit_text(report, reply_markup=kb)
         return
 
-    # زر دمج سلسلة في فيلم طويل
     if "/make_movie" in text or "دمج سلسلة" in text:
         if len(sess["produced_videos"]) < 2:
             await message.reply_text("🎞️ يجب أن تنتج مقطعين على الأقل في هذه الجلسة ليتم دمجهما في فيلم طويل!")
@@ -259,7 +277,6 @@ async def text_handler(client, message):
             await wait_m.delete()
         return
 
-    # إذا كان في وضع الستوري وأرسل نصاً بعد رفع صوره
     if sess["mode"] == "story" and sess["story_photos"]:
         wait_s = await message.reply_text("📸 **جاري مونتاج صورك الشخصية مع التعليق الصوتي والموسيقى...**")
         out_vid = await media_engine.produce_personal_story_reel(
@@ -276,7 +293,6 @@ async def text_handler(client, message):
             await wait_s.delete()
             return
 
-    # تشغيل طاولة الوكلاء الـ 20 وإنتاج الفيديو الكامل
     status_msg = await message.reply_text("💬 **غرفة العمليات (20 وكيلاً) تصيغ السيناريو وتولد اللوحات البصرية الآن...**")
 
     blueprint, debate_log = await boardroom.run_consensus_debate(
@@ -306,13 +322,14 @@ async def text_handler(client, message):
         caption = (
             f"🎬 **{blueprint.get('title', text[:50])}**\n"
             f"• **الوضع:** `{PRODUCTION_MODES.get(blueprint.get('mode'), sess['mode'])}`\n"
-            f"• **اللغة:** `{SUPPORTED_LANGUAGES.get(blueprint.get('language', 'ar'))['name']}`\n"
+            f"• **اللغة:** `{SUPPORTED_LANGUAGES.get(blueprint.get('language', 'ar'), SUPPORTED_LANGUAGES['ar'])['name']}`\n"
             f"• **إشراف:** مجلس الـ 20 وكيلاً (v{boardroom.upgrade_level}.0)"
         )
         await client.send_video(chat_id, final_video, caption=caption)
         await status_msg.delete()
     else:
         await status_msg.edit_text("⚠️ تعذر إنتاج الفيديو، يرجى المحاولة مرة أخرى.")
+
 
 if __name__ == "__main__":
     print("🚀 Genesis Studio Engine v20-Agents is running...")
