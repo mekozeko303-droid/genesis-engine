@@ -152,6 +152,15 @@
       "desc": "قصص غموض ورعب وتشويق بفلاتر مظلمة ومؤثرات صوتية مرعبة.",
       "preview_url": "https://image.pollinations.ai/prompt/Dark%20mysterious%20foggy%20street%20silhouette%20thriller%20movie%20scene%204k?width=720&height=480&nologo=true",
       "sample_file_id": ""
+    },
+    "viral_cinematic": {
+      "name": "✨ فيديو فيروسي ديناميكي سينمائي",
+      "engine": "hybrid_router",
+      "cost_pct": 4.0,
+      "style": "A high-energy, cinematic style video featuring dynamic camera movement, rapid cuts, stunning color grading, vibrant neon lighting, dramatic score, wide‑angle shots, 4K resolution, and viral-worthy slow motion elements for trend‑worthy social media content.",
+      "desc": "مقطع فيديو يدمج الحركة السريعة مع التصوير السينمائي والتأثيرات البصرية المتزجة، مخصص لخلق محتوى فيروسي جذاب ومُلهم.",
+      "preview_url": "https://image.pollinations.ai/prompt/A%20high-energy%2C%20cinematic%20style%20video%20featuring%20dynamic%20camera%20movement%2C%20rapid%20cuts%2C%20stunning%20color%20grading%2C%20vibrant%20neon?width=720&height=480&nologo=true",
+      "sample_file_id": "BAACAgQAAxkBAAIFF2rmOL-8Q_Ks25hT9i2Lbo46XtsPAAIiKQACKjQwUyoRL18NTiBCHgQ"
     }
   },
   "api_keys": {},
@@ -170,5 +179,16 @@
     "last_reset": 1793464827.5522614,
     "active_node": "Node_1"
   },
-  "pending_upgrades": {}
+  "pending_upgrades": {
+    "upg_72629": {
+      "tool_name": "Fish-Speech",
+      "is_real_and_available": false,
+      "verdict": "FAKE_HYPE",
+      "comparison_ar": "الفحص اللحظي في منصة HuggingFace ومصادر GitHub كشف عدم وجود أي عميل أو نموذج يحمل اسم Fish‑Speech عند تاريخ 31/10/2026. لا توجد وثائق رسمية، لا منح توكن، ولا فحص للواجهة البرمجية. بالتالي، لا يمكن مقارنة وتعزيز موجودة في نظام Genesis Engine. يوصى بترك هذا الاسم كرصيف بحثي، على أن يتم مراجعة المصادر مستقبلاً إذا ظهر أي إشارات جديدة، لكن حتى الآن لا يوجد دليل على وجود أداة محددة بهذا الاسم.",
+      "requires_api_key": false,
+      "key_env_name": "",
+      "signup_url": "https://huggingface.co/settings/tokens",
+      "integration_code_snippet": ""
+    }
+  }
 }
