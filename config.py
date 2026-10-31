@@ -7,7 +7,6 @@ TELEGRAM_API_ID = 31270154
 TELEGRAM_API_HASH = "5a056c44d67b3e3318b3f122436cf019"
 TELEGRAM_BOT_TOKEN = "9093676549:AAEvZHvi_Vr_M65A1oYdmDHRoJtB2LFmlis"
 
-# حماية البوت: ضع الـ ID الخاص بك هنا ليعمل معك فقط أو اتركه فارغاً للتعرف التلقائي على المالك
 AUTHORIZED_USERS = []
 
 # ==========================================
@@ -49,36 +48,45 @@ GEMINI_API_KEYS = [
 PIXABAY_API_KEY = "58313642-74c3e2c37ac5e866948e83ef1"
 
 # ==========================================
-# 5. الأوضاع الثمانية الاحترافية (مع وضع الكرتون)
+# 5. الأوضاع التسعة الشاملة (بما فيها الستوري والكرتون)
 # ==========================================
 PRODUCTION_MODES = {
     "cinematic": "🎬 سينمائي 100% (هوليوود واقعي)",
     "hybrid": "🧠 المخرج الذكي (هجين ديناميكي)",
-    "kids": "👶 أفلام كرتون وأنيميشن 3D (Pixar/Disney)",
-    "dialogue": "🗣️ حوار تمثيلي (شخصيات متعددة بأصوات مختلفة)",
-    "news": "📰 استوديو الأخبار والتقارير الوثائقية",
-    "fast": "⚡ الوضع السريع (إنتاج فوري خفيف)",
-    "ads": "📢 مدير الإعلانات التجارية الفيروسية",
-    "cloning": "🧬 استنساخ الوجه والصوت (Face Swap & Lip-Sync)"
+    "kids": "👶 كرتون وأنيميشن 3D (Pixar)",
+    "story": "📸 ستوري وريلز صوري (بدون تشويه)",
+    "dialogue": "🗣️ حوار تمثيلي (رجل وامرأة)",
+    "news": "📰 استوديو الأخبار والوثائقيات",
+    "fast": "⚡ الوضع السريع (إنتاج خاطف)",
+    "ads": "📢 مدير الإعلانات التجارية",
+    "cloning": "🧬 استنساخ الوجه والصوت"
 }
 
 # ==========================================
-# 6. اللغات والأصوات البشرية الفائقة (Neural Human Voices)
+# 6. اللغات والأصوات البشرية العصبية (Neural Voices)
 # ==========================================
 SUPPORTED_LANGUAGES = {
     "ar": {
-        "name": "🇸🇦 العربية (فصحى سينمائية بشرية)",
+        "name": "🇸🇦 العربية الفصحى (صوت بشري سينمائي)",
         "male_voice": "ar-SA-HamedNeural",
         "female_voice": "ar-EG-SalmaNeural",
         "kids_voice": "ar-AE-FatimaNeural",
-        "rate": "-4%",
-        "pitch": "-2Hz"
+        "rate": "-2%",
+        "pitch": "-1Hz"
     },
     "ar_ye": {
-        "name": "🇾🇪 العربية (نبرة يمنية طبيعية)",
+        "name": "🇾🇪 اللهجة اليمنية (صوت طبيعي)",
         "male_voice": "ar-YE-SalehNeural",
         "female_voice": "ar-YE-MaryamNeural",
         "kids_voice": "ar-YE-MaryamNeural",
+        "rate": "+0%",
+        "pitch": "+0Hz"
+    },
+    "ar_f": {
+        "name": "🎙️ العربية (صوت نسائي إعلاني دافئ)",
+        "male_voice": "ar-EG-SalmaNeural",
+        "female_voice": "ar-SA-ZariyahNeural",
+        "kids_voice": "ar-AE-FatimaNeural",
         "rate": "+0%",
         "pitch": "+0Hz"
     },
@@ -91,7 +99,7 @@ SUPPORTED_LANGUAGES = {
         "pitch": "+0Hz"
     },
     "fr": {
-        "name": "🇫🇷 Français (Voix Humaine Naturelle)",
+        "name": "🇫🇷 Français (Voix Humaine)",
         "male_voice": "fr-FR-RemyMultilingualNeural",
         "female_voice": "fr-FR-VivienneMultilingualNeural",
         "kids_voice": "fr-FR-EloiseNeural",
@@ -99,7 +107,7 @@ SUPPORTED_LANGUAGES = {
         "pitch": "+0Hz"
     },
     "es": {
-        "name": "🇪🇸 Español (Voz Humana Realista)",
+        "name": "🇪🇸 Español (Voz Realista)",
         "male_voice": "es-ES-AlvaroNeural",
         "female_voice": "es-ES-ElviraNeural",
         "kids_voice": "es-MX-MarinaNeural",
@@ -107,7 +115,7 @@ SUPPORTED_LANGUAGES = {
         "pitch": "+0Hz"
     },
     "tr": {
-        "name": "🇹🇷 Türkçe (Gerçekçi İnsan Sesi)",
+        "name": "🇹🇷 Türkçe (Gerçekçi Ses)",
         "male_voice": "tr-TR-AhmetNeural",
         "female_voice": "tr-TR-EmelNeural",
         "kids_voice": "tr-TR-EmelNeural",
