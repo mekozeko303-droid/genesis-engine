@@ -6,7 +6,7 @@ from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
 from database import db
-from sentinel_evolution import sentinel, SmartCouncil
+from sentinel_evolution import sentinel, video_engine
 
 if not Config.BOT_TOKEN:
     print("❌ خطأ: لم يتم العثور على TELEGRAM_BOT_TOKEN في GitHub Secrets!")
@@ -29,27 +29,28 @@ def get_main_dashboard(user_id):
     selected_mode = USER_STATE.get(user_id, {}).get("mode", "hybrid")
     modes = db.get_all_modes()
     m_info = modes.get(selected_mode, modes["hybrid"])
+    est_time = m_info.get("est_time", "45 إلى 75 ثانية")
     quota = db.get_quota_status()
 
     text = (
-        "👑 **إمبراطورية Genesis Engine الخالدة (v5.5 Immortal)**\n"
+        "👑 **إمبراطورية Genesis Engine الخالدة (v6.0 Real Video Producer)**\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 **الوضع النشط حالياً:** `{m_info['name']}`\n"
+        f"⏱️ **مدة تجهيز الفيديو في هذا الوضع:** `{est_time}`\n"
         f"📝 **وصف الوضع:** {m_info.get('desc', '')}\n"
         f"🔋 **رصيد المعالجة اليومي المتبقي:** `{quota['remaining_pct']}%`\n"
         f"⏳ **يتجدد الرصيد بالكامل بعد:** `{quota['reset_in']}`\n"
-        f"🖥️ **عقدة كاجل النشطة:** `{quota['active_node']} (60h Fleet)`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 *أرسل فكرة الفيديو مباشرة للبدء، أو اختر من الأزرار:*"
+        "💡 *اكتب فكرة الفيديو مباشرة في المحادثة ليبدأ البوت بإنتاج وإرسال ملف الفيديو (`.mp4`) بالصوت العربي فوراً!*"
     )
 
     buttons = [
         [
-            InlineKeyboardButton("🎬 تصفح الأوضاع الـ 17+ (مع الصور)", callback_data="menu_modes_0"),
+            InlineKeyboardButton("🎬 تصفح الأوضاع الـ 17+ (مع فيديو معاينة)", callback_data="menu_modes_0"),
             InlineKeyboardButton("📊 تفاصيل الموارد والذاكرة", callback_data="menu_quota")
         ],
         [
-            InlineKeyboardButton("🔬 فحص خبر / أداة جديدة وتطوير النظام", callback_data="menu_eval_news")
+            InlineKeyboardButton("🔬 فحص خبر أو البحث التلقائي عن أداة جديدة", callback_data="menu_eval_news")
         ],
         [
             InlineKeyboardButton("🧬 استنساخ وضع جديد من فيديو", callback_data="menu_clone_style"),
@@ -88,10 +89,11 @@ def build_modes_keyboard(page=0):
 async def execute_upgrade_flow(client, chat_id, uid, upg_id, status_message=None):
     upg = db.get_pending_upgrade(upg_id)
     if not upg:
+        msg = "⚠️ انتهت صلاحية هذا الطلب أو تم تنفيذه مسبقاً."
         if status_message:
-            await status_message.edit_text("⚠️ انتهت صلاحية هذا الطلب أو تم تنفيذه مسبقاً.")
+            await status_message.edit_text(msg)
         else:
-            await client.send_message(chat_id, "⚠️ انتهت صلاحية هذا الطلب أو تم تنفيذه مسبقاً.")
+            await client.send_message(chat_id, msg)
         return
 
     if upg.get("requires_api_key") and upg.get("key_env_name"):
@@ -100,7 +102,7 @@ async def execute_upgrade_flow(client, chat_id, uid, upg_id, status_message=None
             USER_STATE[uid]["action"] = f"awaiting_upgrade_key_{upg_id}"
             key_prompt = (
                 f"🔑 **هذه الأداة (`{upg['tool_name']}`) تحتاج مفتاح API لتعمل:**\n\n"
-                f"1️⃣ ادخل على الرابط المباشر التالي لاستخراج المفتاح:\n🔗 {upg.get('signup_url', 'https://huggingface.co/settings/tokens')}\n\n"
+                f"1️⃣ ادخل على الرابط المباشر التالي لاستخراج المفتاح:\n🔗 {upg.get('signup_url', '[https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)')}\n\n"
                 f"2️⃣ انسخ المفتاح وأرسله لي هنا في المحادثة مباشرة، وسأقوم بحفظه تلقائياً باسم `{key_name}` وإكمال التطوير فوراً!"
             )
             markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
@@ -111,10 +113,7 @@ async def execute_upgrade_flow(client, chat_id, uid, upg_id, status_message=None
             return
 
     wait_text = f"⏳ **جاري اختبار وتجهيز التطوير (`{upg['tool_name']}`) في البيئة المعزولة (`{Config.SANDBOX_BRANCH}`)...**"
-    if status_message:
-        msg_obj = await status_message.edit_text(wait_text)
-    else:
-        msg_obj = await client.send_message(chat_id, wait_text)
+    msg_obj = await status_message.edit_text(wait_text) if status_message else await client.send_message(chat_id, wait_text)
 
     ok, sandbox_msg = await asyncio.to_thread(
         sentinel.test_in_sandbox_branch,
@@ -167,7 +166,7 @@ async def handle_callbacks(client, cq):
         page = int(data.split("_")[-1])
         msg_text = (
             f"🎬 **اختر وضع الإنتاج المطلوب (صفحة {page + 1}):**\n"
-            "*(عند اختيار أي وضع، ستظهر لك صورة معاينة أو فيديو تذكيري يوضح ستايل هذا الوضع)*"
+            "*(عند اختيار أي وضع، سيرسل لك البوت **فيديو معاينة حقيقي** يوضح ستايل هذا الوضع ومدة تجهيزه)*"
         )
         if cq.message.photo or cq.message.video:
             await cq.message.delete()
@@ -181,18 +180,23 @@ async def handle_callbacks(client, cq):
         USER_STATE[uid]["action"] = None
         modes = db.get_all_modes()
         m_info = modes.get(mode_key, modes["hybrid"])
+        default_mode = Config.DEFAULT_MODES.get(mode_key, {})
+        est_time = m_info.get("est_time") or default_mode.get("est_time", "45 إلى 75 ثانية")
+        m_info["est_time"] = est_time
+        m_info["voice"] = m_info.get("voice") or default_mode.get("voice", "ar-SA-HamedNeural")
+        m_info["vfilter"] = m_info.get("vfilter") or default_mode.get("vfilter", "eq=contrast=1.15:saturation=1.15")
 
         caption = (
             f"✅ **تم تفعيل: {m_info['name']}**\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📖 **تذكير بنوع الفيديو في هذا الوضع:**\n{m_info.get('desc', 'إنتاج احترافي متكامل.')}\n\n"
-            f"🎨 **البصمة البصرية (Style Prompt):**\n`{m_info['style']}`\n\n"
+            f"📖 **نوع الفيديو في هذا الوضع:**\n{m_info.get('desc', 'إنتاج احترافي متكامل.')}\n\n"
+            f"⏱️ **مدة تجهيز وإنتاج الفيديو:** `{est_time}`\n"
             f"⚡ **الاستهلاك لكل مشروع:** `{m_info['cost_pct']}%` من الحصة اليومية\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "✍️ **اكتب الآن فكرة الفيديو مباشرة في المحادثة لنبدأ إنتاجه بهذا النمط!**"
+            "✍️ **اكتب الآن فكرة الفيديو مباشرة في المحادثة ليبدأ البوت بإنتاج وإرسال الفيديو (`.mp4`) لك!**"
         )
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📹 حفظ فيديو تذكيري خاص لهذا الوضع", callback_data=f"setsample_{mode_key}")],
+            [InlineKeyboardButton("📹 تغيير الفيديو التذكيري لهذا الوضع", callback_data=f"setsample_{mode_key}")],
             [
                 InlineKeyboardButton("🔄 تغيير الوضع", callback_data="menu_modes_0"),
                 InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")
@@ -201,17 +205,24 @@ async def handle_callbacks(client, cq):
 
         await cq.message.delete()
         sample_vid = m_info.get("sample_file_id", "")
-        preview_img = m_info.get("preview_url", "")
 
-        try:
-            if sample_vid:
+        if sample_vid:
+            try:
                 await client.send_video(uid, sample_vid, caption=caption, reply_markup=buttons)
-            elif preview_img:
-                await client.send_photo(uid, preview_img, caption=caption, reply_markup=buttons)
-            else:
-                await client.send_message(uid, caption, reply_markup=buttons)
+                return
+            except Exception:
+                pass
+
+        # توليد فيديو معاينة حقيقي (.mp4) للوضع بدلاً من الصورة الثابتة وحفظه تلقائياً
+        wait_prev = await client.send_message(uid, f"🎬 **جاري تجهيز فيديو المعاينة الحقيقي لوضع ({m_info['name']})...**")
+        try:
+            mp4_preview = await video_engine.generate_mode_preview_video(mode_key, m_info)
+            sent_v = await client.send_video(uid, mp4_preview, caption=caption, reply_markup=buttons)
+            await wait_prev.delete()
+            if sent_v and sent_v.video:
+                db.set_mode_sample_video(mode_key, sent_v.video.file_id)
         except Exception:
-            await client.send_message(uid, caption, reply_markup=buttons)
+            await wait_prev.edit_text(caption, reply_markup=buttons)
 
     elif data.startswith("setsample_"):
         mode_key = data.replace("setsample_", "")
@@ -239,9 +250,9 @@ async def handle_callbacks(client, cq):
     elif data == "menu_eval_news":
         USER_STATE[uid]["action"] = "awaiting_news"
         await cq.message.edit_text(
-            "🔬 **مختبر فحص الأخبار والأدوات والتطوير الذاتي (Truth Sentinel):**\n\n"
-            "اكتب لي الآن أي خبر سمعته أو اسم أداة/نموذج جديد.\n"
-            "سأتحقق منه وأقارنه بما لديك، وأخبرك هل الأفضل إضافته أم لا، ثم أسألك: **هل تريد أن تعمل التحديث أو التطوير؟** وتجيب فقط بـ **نعم** (كتابة أو بالزر) ليتم إضافته فوراً!",
+            "🔬 **مختبر فحص الأخبار والبحث الذاتي عن الأدوات (Truth Sentinel):**\n\n"
+            "• اكتب اسم أي أداة سمعت عنها لفحصها.\n"
+            "• أو اكتب **ابحث انت وقلي** ليقوم البوت بنفسه بالبحث في HuggingFace وGitHub عن أحدث أداة ذكاء اصطناعي جديدة ويقترحها عليك!",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
         )
 
@@ -249,7 +260,7 @@ async def handle_callbacks(client, cq):
         USER_STATE[uid]["action"] = "awaiting_style_clone"
         await cq.message.edit_text(
             "🧬 **وكيل الهندسة العكسية واستنساخ الأنماط (مع كاشف التكرار):**\n\n"
-            "أرسل لي الآن **فيديو** أعجبك (أو اكتب وصفاً للنمط الذي تريده).\n"
+            "أرسل لي الآن **فيديو** أعجبك (أو اكتب وصفاً للنمط الذي تريده) ليتم استنساخه كوضع جديد.\n"
             "⚠️ *ملاحظة: إذا كان الوضع موجوداً مسبقاً في نظامك، سيرفض النظام إضافته ويخبرك باسم الوضع الموجود عندك!*",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
         )
@@ -277,6 +288,7 @@ async def handle_user_input(client, message):
     uid = message.from_user.id
     USER_STATE.setdefault(uid, {"mode": "hybrid", "action": None})
     action = USER_STATE[uid].get("action")
+    mode_key = USER_STATE[uid].get("mode", "hybrid")
     text = (message.text or message.caption or "").strip()
 
     # 0. إذا قال المستخدم "نعم" لتأكيد التحديث أو التطوير
@@ -293,20 +305,20 @@ async def handle_user_input(client, message):
 
     # 1. حفظ فيديو تذكيري لوضع معين
     if action and action.startswith("awaiting_sample_vid_"):
-        mode_key = action.replace("awaiting_sample_vid_", "")
+        target_mode = action.replace("awaiting_sample_vid_", "")
         USER_STATE[uid]["action"] = None
         if message.video:
-            db.set_mode_sample_video(mode_key, message.video.file_id)
+            db.set_mode_sample_video(target_mode, message.video.file_id)
             await message.reply_text(
                 "✅ **تم حفظ الفيديو التذكيري لهذا الوضع بنجاح!** سيظهر لك دائماً عند اختيار هذا الوضع.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 عرض الوضع الآن", callback_data=f"setmode_{mode_key}")]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 عرض الوضع الآن", callback_data=f"setmode_{target_mode}")]])
             )
         else:
             await message.reply_text("⚠️ يرجى إرسال ملف فيديو صالح.")
         return
 
-    # 2. استنساخ نمط جديد مع فحص التكرار الصارم
-    if action == "awaiting_style_clone" or message.video:
+    # 2. استنساخ نمط جديد فقط عندما يطلب المستخدم ذلك صراحة من زر الاستنساخ
+    if action == "awaiting_style_clone":
         USER_STATE[uid]["action"] = None
         wait_msg = await message.reply_text("🔍 **جاري تحليل النمط وفحص جميع الأوضاع للتأكد من عدم وجوده مسبقاً...**")
         style_data = await asyncio.to_thread(sentinel.reverse_engineer_video_style, text or "Viral dynamic cinematic video")
@@ -342,23 +354,43 @@ async def handle_user_input(client, message):
         await wait_msg.edit_text(
             f"✅ **تم استنساخ النمط الجديد وإضافته لنظامك للأبد!**\n\n"
             f"🏷️ **اسم الوضع الجديد:** `{result_mode['name']}`\n"
-            f"📖 **الوصف:** {result_mode['desc']}\n"
-            f"🎨 **الكود البصري المستخرج:**\n`{result_mode['style']}`",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👁️ معاينة الوضع الجديد", callback_data=f"setmode_{style_data['mode_id']}")]])
+            f"📖 **الوصف:** {result_mode['desc']}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👁️ معاينة الوضع الجديد بالفيديو", callback_data=f"setmode_{style_data['mode_id']}")]])
         )
         return
 
-    # 3. فحص خبر أو أداة جديدة
+    # 3. إذا أرسل المستخدم فيديو وهو داخل وضع "استنساخ الوجه والحذف" (يقوم بمعالجة الفيديو وتنظيفه)
+    if message.video and mode_key == "cloning":
+        proc_msg = await message.reply_text(
+            "🧬 **جاري معالجة الفيديو في وضع (استنساخ الوجه والحذف)...**\n"
+            "⏱️ **المدة المقدرة:** `45 إلى 90 ثانية`\n"
+            "⏳ *جاري قص العلامات المائية من الأطراف وترميم جودة الملامح والألوان...*"
+        )
+        dl_path = await message.download(file_name=f"/tmp/input_{message.id}.mp4")
+        cleaned_path = await video_engine.clean_and_enhance_video(dl_path)
+        quota_after = db.consume_quota(8.0)
+        await client.send_video(
+            uid,
+            cleaned_path,
+            caption=(
+                "✅ **تم تنظيف الفيديو من العلامات المائية وترميم الجودة بنجاح!**\n"
+                f"🔋 **الحصة المتبقية لك اليوم:** `{quota_after['remaining_pct']}%`"
+            ),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+        )
+        await proc_msg.delete()
+        return
+
+    # 4. فحص خبر أو البحث التلقائي عن أداة جديدة
     if action == "awaiting_news":
-        wait_msg = await message.reply_text("🛰️ **جاري التحقق من الخبر ومقارنته مع إمكانيات نظامك الحالية...**")
+        wait_msg = await message.reply_text("🛰️ **جاري البحث في HuggingFace وGitHub ومقارنة الأداة مع إمكانيات نظامك...**")
         report = await asyncio.to_thread(sentinel.evaluate_user_news, text)
 
         if report.get("verdict") == "ALREADY_HAVE":
             USER_STATE[uid]["action"] = None
             await wait_msg.edit_text(
                 f"⛔ **تقرير الفحص: هذه الميزة/الأداة (`{report.get('tool_name')}`) موجودة في نظامك مسبقاً!**\n\n"
-                f"📊 **التفاصيل:**\n{report.get('comparison_ar')}\n\n"
-                "تم رفض الإضافة لمنع التكرار.",
+                f"📊 **التفاصيل:**\n{report.get('comparison_ar')}",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
             )
             return
@@ -368,7 +400,7 @@ async def handle_user_input(client, message):
         USER_STATE[uid]["action"] = f"confirm_upgrade_{upg_id}"
 
         verdict_map = {
-            "BETTER": "🟢 **نعم، هذه الأداة أفضل وتستحق الإضافة لتطوير النظام**",
+            "BETTER": "🟢 **نعم، هذه الأداة ممتازة وتستحق الإضافة لتطوير النظام**",
             "FAKE_HYPE": "🔴 **لا أنصح بها (دعاية فقط أو غير متاحة مجاناً)**"
         }
         v_text = verdict_map.get(report.get("verdict"), "🟢 **متاحة وقابلة للإضافة**")
@@ -390,7 +422,7 @@ async def handle_user_input(client, message):
         await wait_msg.edit_text(reply, reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # 4. استقبال مفتاح API لترقية معلقة وإضافته تلقائياً
+    # 5. استقبال مفتاح API لترقية معلقة
     if action and action.startswith("awaiting_upgrade_key_"):
         upg_id = action.replace("awaiting_upgrade_key_", "")
         USER_STATE[uid]["action"] = None
@@ -402,7 +434,7 @@ async def handle_user_input(client, message):
             await execute_upgrade_flow(client, message.chat.id, uid, upg_id)
         return
 
-    # 5. استقبال مفتاح API يدوي
+    # 6. استقبال مفتاح API يدوي
     if action == "awaiting_manual_key":
         USER_STATE[uid]["action"] = None
         if ":" in text:
@@ -413,45 +445,73 @@ async def handle_user_input(client, message):
             await message.reply_text("⚠️ الصيغة غير صحيحة. أرسله هكذا: `NAME:KEY`")
         return
 
-    # 6. الإنتاج الفعلي حسب الوضع المختار
-    mode_key = USER_STATE[uid].get("mode", "hybrid")
+    # 7. الإنتاج الفعلي للفيديو الكامل (.mp4) بالصوت العربي حسب الوضع المختار
     modes = db.get_all_modes()
     m_info = modes.get(mode_key, modes["hybrid"])
-    quota_before = db.get_quota_status()
+    default_mode = Config.DEFAULT_MODES.get(mode_key, {})
+    est_time = m_info.get("est_time") or default_mode.get("est_time", "45 إلى 75 ثانية")
+    m_info["voice"] = m_info.get("voice") or default_mode.get("voice", "ar-SA-HamedNeural")
+    m_info["vfilter"] = m_info.get("vfilter") or default_mode.get("vfilter", "eq=contrast=1.15:saturation=1.15")
 
+    quota_before = db.get_quota_status()
     if quota_before["remaining_pct"] < m_info["cost_pct"]:
         await message.reply_text(
             f"⚠️ **رصيد اليوم ({quota_before['remaining_pct']}%) لا يكفي لهذا الوضع ({m_info['cost_pct']}%).**\n"
-            f"⏳ سيتجدد الرصيد بالكامل بعد: `{quota_before['reset_in']}`، أو اختر الوضع السريع/الستيك مان."
+            f"⏳ سيتجدد الرصيد بالكامل بعد: `{quota_before['reset_in']}`، أو اختر الوضع السريع."
         )
         return
 
     status_msg = await message.reply_text(
-        f"🎬 **بدأ مجلس الوكلاء العمل على مشروعك!**\n"
-        f"▪️ **الوضع:** `{m_info['name']}`\n"
-        f"▪️ **الاستهلاك المقدر:** `{m_info['cost_pct']}%` من الحصة اليومية\n"
-        f"▪️ **العقدة النشطة:** `{quota_before['active_node']}`\n"
-        "⏳ *جاري تطبيق الدروس السابقة وبناء السيناريو وتوزيع المشاهد...*"
+        f"🎬 **بدأ إنتاج الفيديو الحقيقي لمشروعك!**\n"
+        f"▪️ **الوضع النشط:** `{m_info['name']}`\n"
+        f"⏱️ **المدة المقدرة للتجهيز:** `{est_time}`\n"
+        f"▪️ **الاستهلاك:** `{m_info['cost_pct']}%` من الحصة اليومية\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "⏳ *جاري البدء بالخطوة 1 من 4...*"
     )
 
-    learned_rules = db.get_relevant_lessons()
-    director_prompt = (
-        f"أنت المخرج الذكي الشامل. الفكرة: {text}\n"
-        f"النمط المطلوب: {m_info['style']}\n"
-        f"قواعد التعلم السابقة التي يجب الالتزام بها: {learned_rules}\n"
-        "اكتب خطة إنتاج سينمائية مفصلة من 3 مشاهد مع تحديد المحرك لكل مشهد (Hero Shot على Kaggle أو Fast Shot) وبرومبت إنجليزي دقيق."
-    )
-    plan = await asyncio.to_thread(SmartCouncil.ask, "أنت مخرج سينمائي محترف.", director_prompt, False)
-    quota_after = db.consume_quota(m_info["cost_pct"])
+    async def update_progress(step_text):
+        try:
+            await status_msg.edit_text(
+                f"🎬 **جاري صناعة وريندر الفيديو الخاص بك...**\n"
+                f"▪️ **الوضع:** `{m_info['name']}` (المدة المقدرة: `{est_time}`)\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{step_text}"
+            )
+        except Exception:
+            pass
 
-    await status_msg.edit_text(
-        f"✅ **اكتمل التخطيط والتوجيه الهندسي للمشروع!**\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{plan[:3000]}\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔋 **الحصة المتبقية لك اليوم:** `{quota_after['remaining_pct']}%` (تتجدد بعد `{quota_after['reset_in']}`)",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
-    )
+    try:
+        final_video_path, script_data = await video_engine.render_full_video(
+            text or "قصة رجل غامض في ليلة مظلمة",
+            mode_key,
+            m_info,
+            progress_callback=update_progress
+        )
+        quota_after = db.consume_quota(m_info["cost_pct"])
+
+        video_caption = (
+            f"✅ **تم إنتاج الفيديو بنجاح!**\n"
+            f"🎬 **العنوان:** {script_data.get('title_ar', '')}\n"
+            f"🎯 **الوضع:** `{m_info['name']}`\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎙️ **النص الصوتي العربي:**\n{script_data.get('voiceover_ar', '')}\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔋 **الحصة المتبقية اليوم:** `{quota_after['remaining_pct']}%` (تتجدد بعد `{quota_after['reset_in']}`)"
+        )
+
+        await client.send_video(
+            uid,
+            final_video_path,
+            caption=video_caption[:1020],
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+        )
+        await status_msg.delete()
+    except Exception as e:
+        await status_msg.edit_text(
+            f"⚠️ حدث خطأ أثناء ريندر الفيديو: `{str(e)[:150]}`",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+        )
 
 
 async def immortal_lifecycle_watchdog():
@@ -465,10 +525,10 @@ async def immortal_lifecycle_watchdog():
 
 
 async def start_genesis():
-    print("🚀 Starting Genesis Immortal Engine v5.5...")
+    print("🚀 Starting Genesis Immortal Engine v6.0 (Full Video Producer)...")
     await app.start()
     asyncio.create_task(immortal_lifecycle_watchdog())
-    print("✅ Bot is online and listening 24/7 on Telegram!")
+    print("✅ Bot is online and ready to render MP4 videos 24/7!")
     await idle()
     await app.stop()
 
