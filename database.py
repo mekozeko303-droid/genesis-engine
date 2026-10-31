@@ -5,6 +5,7 @@ import difflib
 import requests
 from config import Config
 
+
 class GenesisDatabase:
     def __init__(self):
         self.base_url = f"{Config.SUPABASE_URL.rstrip('/')}/rest/v1"
@@ -35,7 +36,6 @@ class GenesisDatabase:
             }
             self._save_local(initial_data)
         else:
-            # ضمان تحديث الصور التوضيحية لأي وضع افتراضي
             data = self._load_local()
             modes = data.get("modes", {})
             for k, v in Config.DEFAULT_MODES.items():
@@ -46,6 +46,8 @@ class GenesisDatabase:
                     modes[k].setdefault("desc", v["desc"])
                     modes[k].setdefault("sample_file_id", "")
             data["modes"] = modes
+            data.setdefault("pending_upgrades", {})
+            data.setdefault("api_keys", {})
             self._save_local(data)
 
     def _load_local(self):
@@ -53,15 +55,23 @@ class GenesisDatabase:
             with open(self.local_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            with open(self.local_file, "w", encoding="utf-8") as f:
-                json.dump({"modes": Config.DEFAULT_MODES, "api_keys": {}, "lessons": [], "quota": {"used_pct": 0.0, "last_reset": time.time(), "active_node": "Node_1"}, "pending_upgrades": {}}, f)
-            return {"modes": Config.DEFAULT_MODES, "api_keys": {}, "lessons": [], "quota": {"used_pct": 0.0, "last_reset": time.time(), "active_node": "Node_1"}, "pending_upgrades": {}}
+            fallback = {
+                "modes": Config.DEFAULT_MODES,
+                "api_keys": {},
+                "lessons": [],
+                "quota": {"used_pct": 0.0, "last_reset": time.time(), "active_node": "Node_1"},
+                "pending_upgrades": {}
+            }
+            self._save_local(fallback)
+            return fallback
 
     def _save_local(self, data):
         with open(self.local_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def _supabase_sync(self, table, payload):
+        if not Config.SUPABASE_SECRET_KEY:
+            return
         try:
             requests.post(f"{self.base_url}/{table}", headers=self.headers, json=payload, timeout=5)
         except Exception:
@@ -70,7 +80,6 @@ class GenesisDatabase:
     def get_all_modes(self):
         return self._load_local().get("modes", Config.DEFAULT_MODES)
 
-    # --- فحص التكرار الذكي قبل إضافة أي وضع جديد ---
     def check_duplicate_mode(self, mode_id, arabic_name, style_prompt):
         modes = self.get_all_modes()
         clean_new_name = arabic_name.replace("✨", "").strip()
@@ -79,12 +88,12 @@ class GenesisDatabase:
             existing_name = info.get("name", "").replace("✨", "").strip()
             existing_style = info.get("style", "")
 
-            if existing_id == mode_id or clean_new_name in existing_name or existing_name in clean_new_name:
+            if existing_id == mode_id or (clean_new_name and (clean_new_name in existing_name or existing_name in clean_new_name)):
                 return True, info
 
             name_sim = difflib.SequenceMatcher(None, clean_new_name, existing_name).ratio()
             style_sim = difflib.SequenceMatcher(None, style_prompt.lower(), existing_style.lower()).ratio()
-            if name_sim > 0.72 or style_sim > 0.70:
+            if name_sim > 0.70 or style_sim > 0.68:
                 return True, info
 
         return False, None
@@ -113,7 +122,6 @@ class GenesisDatabase:
         return True, new_mode
 
     def set_mode_sample_video(self, mode_id, file_id):
-        """حفظ فيديو قصير تذكيري لأي وضع في تيليجرام"""
         data = self._load_local()
         if mode_id in data["modes"]:
             data["modes"][mode_id]["sample_file_id"] = file_id
@@ -129,7 +137,7 @@ class GenesisDatabase:
 
     def get_api_key(self, service_name):
         data = self._load_local()
-        return data.get("api_keys", {}).get(service_name.upper()) or os.getenv(service_name.upper(), "")
+        return data.get("api_keys", {}).get(service_name.upper()) or os.getenv(service_name.upper(), "").strip()
 
     def save_lesson(self, context_tag, rule_learned):
         data = self._load_local()
@@ -184,5 +192,6 @@ class GenesisDatabase:
         if upgrade_id in data.get("pending_upgrades", {}):
             del data["pending_upgrades"][upgrade_id]
             self._save_local(data)
+
 
 db = GenesisDatabase()
