@@ -1,5 +1,12 @@
-pyrogram
+pyrogram>=2.0.106
 tgcrypto
 aiohttp
 requests
 edge-tts
+gTTS
+Pillow
+arabic-reshaper
+python-bidi
+huggingface_hub
+supabase
+kaggle
