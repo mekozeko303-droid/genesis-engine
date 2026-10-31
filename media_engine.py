@@ -5,6 +5,8 @@ import urllib.parse
 import random
 import aiohttp
 import edge_tts
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 import config
 
@@ -23,6 +25,8 @@ class StudioMediaEngine:
         self.work_dir = "workspace"
         os.makedirs(self.work_dir, exist_ok=True)
         self.upgrade_active = True
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        self.profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
 
     def _run_ffmpeg(self, cmd):
         try:
@@ -32,7 +36,7 @@ class StudioMediaEngine:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=120
+                timeout=180
             )
             return res.returncode == 0, res.stderr
         except Exception as e:
@@ -48,6 +52,9 @@ class StudioMediaEngine:
         except Exception:
             return 5.0
 
+    # ==========================================================
+    # 1. توليد الصوت البشري الفائق + موسيقى خلفية سينمائية
+    # ==========================================================
     async def generate_human_voice(self, text, output_path, voice_id="ar-SA-HamedNeural", rate="-2%", pitch="-1Hz", mood="epic"):
         raw_voice = output_path.replace(".mp3", "_raw.mp3")
         clean_text = str(text).replace('"', '').replace("'", "").strip()
@@ -98,6 +105,9 @@ class StudioMediaEngine:
                 os.replace(raw_voice, output_path)
         return dur
 
+    # ==========================================================
+    # 2. محرك الصور رباعي الطبقات (مانع الشاشة السوداء 100%)
+    # ==========================================================
     async def fetch_real_scene_image(self, visual_prompt, search_query, output_jpg, aspect="16:9", mode="hybrid", scene_num=1):
         target_w, target_h = (720, 1280) if aspect == "9:16" else (1280, 720)
         seed = random.randint(1000, 999999)
@@ -248,6 +258,243 @@ class StudioMediaEngine:
             self._run_ffmpeg(fallback_cmd)
         return os.path.exists(output_mp4)
 
+    # ==========================================================
+    # 3. قاطع العلامات المائية وشاشة نهاية إنستجرام الذكي
+    # ==========================================================
+    def clean_video_watermarks_and_outro(self, input_video, cleaned_output):
+        cap = cv2.VideoCapture(input_video)
+        if not cap.isOpened():
+            return input_video
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        duration = total_frames / fps if fps > 0 else 10.0
+
+        # 1. فحص الإطارات لاكتشاف الأشرطة السوداء التي تحمل العلامة المائية (@MOSTAFA_HAZEM911 وغيرها)
+        sample_indices = [int(total_frames * r) for r in [0.15, 0.3, 0.45, 0.6] if int(total_frames * r) < total_frames]
+        y_tops, y_bottoms = [], []
+
+        for idx in sample_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                continue
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            row_means = np.mean(gray, axis=1)
+            # الصفوف المضيئة الفعّالة (تجاهل نص العلامة المائية الضعيف داخل الشريط الأسود)
+            active_rows = np.where(row_means > 22)[0]
+            if len(active_rows) > 20:
+                y_tops.append(int(active_rows[0]))
+                y_bottoms.append(int(active_rows[-1]))
+
+        # 2. فحص نهاية الفيديو لقص شاشة إنستجرام السوداء في آخر الثواني
+        cut_duration = duration
+        if duration > 7.0:
+            mid_frame_idx = int(total_frames * 0.4)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame_idx)
+            ret_m, frame_m = cap.read()
+            mid_brightness = np.mean(cv2.cvtColor(frame_m, cv2.COLOR_BGR2GRAY)) if ret_m and frame_m is not None else 80.0
+
+            # فحص آخر 4.5 ثانية لاكتشاف لحظة تعتيم الشاشة وظهور شعار إنستجرام
+            start_check_sec = max(3.0, duration - 4.5)
+            for sec in np.arange(start_check_sec, duration - 0.3, 0.25):
+                f_idx = int(sec * fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+                ret_e, frame_e = cap.read()
+                if ret_e and frame_e is not None:
+                    gray_e = cv2.cvtColor(frame_e, cv2.COLOR_BGR2GRAY)
+                    if np.mean(gray_e) < mid_brightness * 0.48:
+                        cut_duration = max(3.0, sec - 0.15)
+                        break
+
+        cap.release()
+
+        # تحديد منطقة القص النظيفة لإزالة الأشرطة السوداء والعلامات المائية
+        if y_tops and y_bottoms:
+            y1 = int(np.median(y_tops))
+            y2 = int(np.median(y_bottoms))
+            active_h = y2 - y1
+            if active_h > height * 0.25 and active_h < height * 0.88:
+                # قص الشريط الأسود العلوي والسفلي بالكامل حيث توجد العلامة المائية
+                crop_y = max(0, y1 + 4)
+                crop_h = max(200, min(height - crop_y, active_h - 8))
+                crop_h = crop_h - (crop_h % 2)
+                crop_w = width - (width % 2)
+                vf_clean = f"crop={crop_w}:{crop_h}:0:{crop_y},scale=1280:720,format=yuv420p"
+            else:
+                # إذا كان الفيديو ملء الشاشة، نقص الحواف بنسبة 6% لإزالة أي شعارات في الزوايا
+                cw = int(width * 0.92) - (int(width * 0.92) % 2)
+                ch = int(height * 0.88) - (int(height * 0.88) % 2)
+                cx = (width - cw) // 2
+                cy = (height - ch) // 2
+                vf_clean = f"crop={cw}:{ch}:{cx}:{cy},format=yuv420p"
+        else:
+            vf_clean = "format=yuv420p"
+
+        cmd = (
+            f'ffmpeg -y -i "{input_video}" -t {cut_duration:.2f} '
+            f'-vf "{vf_clean}" -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 192k "{cleaned_output}"'
+        )
+        ok, _ = self._run_ffmpeg(cmd)
+        return cleaned_output if (ok and os.path.exists(cleaned_output)) else input_video
+
+    # ==========================================================
+    # 4. محرك استنساخ الوجه الحقيقي (Seamless Face Swap + Color Match)
+    # ==========================================================
+    def _extract_source_face(self, face_path):
+        img = cv2.imread(face_path)
+        if img is None:
+            return None
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))
+        if len(faces) > 0:
+            faces = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
+            x, y, w, h = faces[0]
+            # أخذ منطقة الملامح الداخلية للوجه (العينين والأنف والفم) لدمج طبيعي
+            pad_x = int(w * 0.08)
+            pad_y = int(h * 0.08)
+            return img[max(0, y + pad_y):min(img.shape[0], y + h - pad_y), max(0, x + pad_x):min(img.shape[1], x + w - pad_x)]
+        # إذا كانت الصورة قريبة جداً للوجه أصلاً
+        h, w = img.shape[:2]
+        return img[int(h * 0.12):int(h * 0.88), int(w * 0.12):int(w * 0.88)]
+
+    def _match_skin_tone(self, src_face, dst_face_roi):
+        try:
+            src_lab = cv2.cvtColor(src_face, cv2.COLOR_BGR2LAB).astype(np.float32)
+            dst_lab = cv2.cvtColor(dst_face_roi, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+            src_mean, src_std = cv2.meanStdDev(src_lab)
+            dst_mean, dst_std = cv2.meanStdDev(dst_lab)
+
+            for c in range(3):
+                s_std = max(src_std[c][0], 1.0)
+                d_std = max(dst_std[c][0], 1.0)
+                src_lab[:, :, c] = (src_lab[:, :, c] - src_mean[c][0]) * (d_std / s_std) * 0.75 + dst_mean[c][0] * 0.75 + src_mean[c][0] * 0.25
+
+            src_lab = np.clip(src_lab, 0, 255).astype(np.uint8)
+            return cv2.cvtColor(src_lab, cv2.COLOR_LAB2BGR)
+        except Exception:
+            return src_face
+
+    def _swap_face_on_frame(self, frame, src_face_crop, last_box=None):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=4, minSize=(36, 36))
+        if len(faces) == 0:
+            faces = self.profile_cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=4, minSize=(36, 36))
+
+        box = None
+        if len(faces) > 0:
+            faces = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
+            fx, fy, fw, fh = [int(v) for v in faces[0]]
+            if last_box is not None:
+                # تنعيم حركة تتبع الوجه بين الإطارات لمنع أي اهتزاز
+                lx, ly, lw, lh, _ = last_box
+                fx = int(0.65 * fx + 0.35 * lx)
+                fy = int(0.65 * fy + 0.35 * ly)
+                fw = int(0.65 * fw + 0.35 * lw)
+                fh = int(0.65 * fh + 0.35 * lh)
+            box = (fx, fy, fw, fh, 0)
+        elif last_box is not None and last_box[4] < 8:
+            # الحفاظ على الوجه لعدة إطارات إذا التفت الممثل سريعاً
+            box = (last_box[0], last_box[1], last_box[2], last_box[3], last_box[4] + 1)
+
+        if box is None:
+            return frame, None
+
+        x, y, w, h, missed = box
+        fh_img, fw_img = frame.shape[:2]
+        x = max(2, min(x, fw_img - w - 2))
+        y = max(2, min(y, fh_img - h - 2))
+        if w < 20 or h < 20 or x + w >= fw_img or y + h >= fh_img:
+            return frame, box
+
+        target_roi = frame[y:y + h, x:x + w]
+        resized_src = cv2.resize(src_face_crop, (w, h), interpolation=cv2.INTER_LANCZOS4)
+        color_matched_src = self._match_skin_tone(resized_src, target_roi)
+
+        # قناع بيضاوي متدرج الحواف لدمج ملامح الوجه بدون حواف حادة
+        mask = np.zeros((h, w), dtype=np.float32)
+        cv2.ellipse(mask, (w // 2, h // 2), (int(w * 0.43), int(h * 0.46)), 0, 0, 360, 1.0, -1)
+        blur_k = max(5, (min(w, h) // 5) | 1)
+        mask = cv2.GaussianBlur(mask, (blur_k, blur_k), 0)
+
+        try:
+            mask_u8 = np.clip(mask * 255, 0, 255).astype(np.uint8)
+            center_pt = (x + w // 2, y + h // 2)
+            frame = cv2.seamlessClone(color_matched_src, frame, mask_u8, center_pt, cv2.NORMAL_CLONE)
+        except Exception:
+            mask_3d = mask[:, :, np.newaxis]
+            blended = (color_matched_src.astype(np.float32) * mask_3d + target_roi.astype(np.float32) * (1.0 - mask_3d)).astype(np.uint8)
+            frame[y:y + h, x:x + w] = blended
+
+        return frame, box
+
+    async def process_face_cloning_video(self, face_path, video_path, custom_caption=""):
+        session_id = random.randint(10000, 99999)
+        cleaned_vid = os.path.join(self.work_dir, f"cleaned_{session_id}.mp4")
+        swapped_silent = os.path.join(self.work_dir, f"swapped_silent_{session_id}.mp4")
+        output_cloned = os.path.join(self.work_dir, f"cloned_master_{session_id}.mp4")
+
+        # الخطوة 1: إزالة العلامة المائية (@MOSTAFA_HAZEM911) والأشرطة السوداء وشاشة نهاية إنستجرام أولاً!
+        working_video = await asyncio.to_thread(self.clean_video_watermarks_and_outro, video_path, cleaned_vid)
+
+        # الخطوة 2: استخراج ملامح وجهك وتطبيق الاستنساخ الحقيقي إطاراً بإطار فوق وجه الممثل
+        src_face_crop = await asyncio.to_thread(self._extract_source_face, face_path)
+        if src_face_crop is not None:
+            def _process_frames():
+                cap = cv2.VideoCapture(working_video)
+                if not cap.isOpened():
+                    return False
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                writer = cv2.VideoWriter(swapped_silent, fourcc, fps, (w, h))
+                last_box = None
+                while True:
+                    ret, frame = cap.read()
+                    if not ret or frame is None:
+                        break
+                    swapped_frame, last_box = self._swap_face_on_frame(frame, src_face_crop, last_box)
+                    writer.write(swapped_frame)
+                cap.release()
+                writer.release()
+                return os.path.exists(swapped_silent)
+
+            ok_swap = await asyncio.to_thread(_process_frames)
+            video_source = swapped_silent if ok_swap else working_video
+        else:
+            video_source = working_video
+
+        # الخطوة 3: دمج الصوت الأصلي (أو الصوت البشري المولد) وإخراج الفيديو النهائي النظيف
+        if custom_caption and len(custom_caption.strip()) > 2:
+            aud_p = os.path.join(self.work_dir, f"clone_aud_{session_id}.mp3")
+            await self.generate_human_voice(custom_caption, aud_p, mood="dramatic")
+            cmd = (
+                f'ffmpeg -y -i "{video_source}" -i "{aud_p}" '
+                f'-map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -crf 20 -c:a aac -shortest "{output_cloned}"'
+            )
+        else:
+            cmd = (
+                f'ffmpeg -y -i "{video_source}" -i "{working_video}" '
+                f'-map 0:v:0 -map 1:a:0? -c:v libx264 -preset veryfast -crf 20 -c:a aac -shortest "{output_cloned}"'
+            )
+
+        ok, _ = self._run_ffmpeg(cmd)
+        return output_cloned if (ok and os.path.exists(output_cloned)) else working_video
+
+    def _apply_smart_face_composite(self, face_img_path, target_scene_path):
+        try:
+            src_crop = self._extract_source_face(face_img_path)
+            frame = cv2.imread(target_scene_path)
+            if src_crop is not None and frame is not None:
+                swapped, _ = self._swap_face_on_frame(frame, src_crop)
+                cv2.imwrite(target_scene_path, swapped)
+        except Exception:
+            pass
+
     async def produce_full_video(self, blueprint, status_callback=None, custom_face_path=None):
         scenes = blueprint.get("scenes", [])
         mode = blueprint.get("mode", "hybrid")
@@ -382,65 +629,6 @@ class StudioMediaEngine:
         mux_cmd = f'ffmpeg -y -i "{merged_silent}" -i "{story_audio}" -c:v copy -c:a aac -b:a 192k -shortest "{final_story}"'
         self._run_ffmpeg(mux_cmd)
         return final_story if os.path.exists(final_story) else merged_silent
-
-    def _apply_smart_face_composite(self, face_img_path, target_scene_path):
-        try:
-            with Image.open(target_scene_path).convert("RGB") as bg, Image.open(face_img_path).convert("RGB") as face:
-                bw, bh = bg.size
-                target_size = int(min(bw, bh) * 0.42)
-                face_cropped = ImageOps.fit(face, (target_size, target_size), method=Image.Resampling.LANCZOS)
-
-                mask = Image.new("L", (target_size, target_size), 0)
-                draw = ImageDraw.Draw(mask)
-                draw.ellipse((4, 4, target_size - 4, target_size - 4), fill=255)
-                mask = mask.filter(ImageFilter.GaussianBlur(8))
-
-                pos_x = (bw - target_size) // 2
-                pos_y = int(bh * 0.14)
-                bg.paste(face_cropped, (pos_x, pos_y), mask)
-                bg.save(target_scene_path, "JPEG", quality=95)
-        except Exception:
-            pass
-
-    async def process_face_cloning_video(self, face_path, video_path, custom_caption=""):
-        session_id = random.randint(10000, 99999)
-        output_cloned = os.path.join(self.work_dir, f"cloned_master_{session_id}.mp4")
-        overlay_circle = os.path.join(self.work_dir, f"face_circle_{session_id}.png")
-
-        try:
-            with Image.open(face_path).convert("RGBA") as im:
-                size = 260
-                im = ImageOps.fit(im, (size, size), method=Image.Resampling.LANCZOS)
-                mask = Image.new("L", (size, size), 0)
-                draw = ImageDraw.Draw(mask)
-                draw.ellipse((6, 6, size - 6, size - 6), fill=255)
-                mask = mask.filter(ImageFilter.GaussianBlur(4))
-                im.putalpha(mask)
-                im.save(overlay_circle, "PNG")
-
-            vf_filter = (
-                f"[1:v]scale=220:220[face];"
-                f"[0:v]eq=contrast=1.12:saturation=1.18[bg];"
-                f"[bg][face]overlay=W-w-30:30:format=auto,format=yuv420p"
-            )
-            if custom_caption:
-                aud_p = os.path.join(self.work_dir, f"clone_aud_{session_id}.mp3")
-                await self.generate_human_voice(custom_caption, aud_p, mood="dramatic")
-                cmd = (
-                    f'ffmpeg -y -i "{video_path}" -i "{overlay_circle}" -i "{aud_p}" '
-                    f'-filter_complex "{vf_filter}" -map 0:v -map 2:a -c:v libx264 -preset veryfast -c:a aac -shortest "{output_cloned}"'
-                )
-            else:
-                cmd = (
-                    f'ffmpeg -y -i "{video_path}" -i "{overlay_circle}" '
-                    f'-filter_complex "{vf_filter}" -c:v libx264 -preset veryfast -c:a copy "{output_cloned}"'
-                )
-            ok, _ = self._run_ffmpeg(cmd)
-            if ok and os.path.exists(output_cloned):
-                return output_cloned
-        except Exception:
-            pass
-        return video_path
 
 
 media_engine = StudioMediaEngine()
