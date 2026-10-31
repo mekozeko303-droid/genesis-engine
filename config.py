@@ -3,8 +3,8 @@ import itertools
 
 class Config:
     # --- 1. إعدادات تيليجرام ---
-    API_ID = int(os.getenv("TELEGRAM_API_ID", "28612841"))
-    API_HASH = os.getenv("TELEGRAM_API_HASH", "your_telegram_api_hash_here")
+API_ID = int(os.getenv("TELEGRAM_API_ID") or "28612841")
+API_HASH = os.getenv("TELEGRAM_API_HASH", "your_telegram_api_hash_here")
     BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "your_telegram_bot_token_here")
 
     # --- 2. إعدادات GitHub للتجدد الذاتي 24/7 والبيئة المعزولة (Sandbox) ---
