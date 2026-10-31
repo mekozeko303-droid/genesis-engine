@@ -1,37 +1,53 @@
 import os
 import itertools
 
-class Config:
-    # --- 1. إعدادات تيليجرام (يجب وضعها في Secrets أو ملف .env) ---
-    # لا تضع المفاتيح هنا مباشرة، اتركها فارغة وسيتم سحبها من الإعدادات
-    API_ID = int(os.getenv("TELEGRAM_API_ID", "0")) 
-    API_HASH = os.getenv("TELEGRAM_API_HASH", "")
-    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-    # --- 2. إعدادات GitHub ---
-    GITHUB_TOKEN = os.getenv("GH_TOKEN", "")
-    GITHUB_REPO = os.getenv("GITHUB_REPO", "mekozeko303-droid/genesis-engine")
+def get_env(key, default=""):
+    val = os.getenv(key, "")
+    if val is None:
+        return default
+    val = val.strip()
+    return val if val else default
+
+
+def get_int_env(key, default):
+    val = get_env(key, "")
+    if val.isdigit() and int(val) > 1000:
+        return int(val)
+    return int(default)
+
+
+class Config:
+    # --- 1. إعدادات تيليجرام المعتمدة من حسابك ---
+    API_ID = get_int_env("TELEGRAM_API_ID", 31270154)
+    _raw_hash = get_env("TELEGRAM_API_HASH", "5a056c44d67b3e3318b3f122436cf019")
+    API_HASH = _raw_hash if len(_raw_hash) == 32 else "5a056c44d67b3e3318b3f122436cf019"
+    BOT_TOKEN = get_env("TELEGRAM_BOT_TOKEN", "")
+
+    # --- 2. إعدادات GitHub للتجدد الذاتي 24/7 والبيئة المعزولة (Sandbox) ---
+    GITHUB_TOKEN = get_env("GH_TOKEN", "")
+    GITHUB_REPO = get_env("GITHUB_REPO", "mekozeko303-droid/genesis-engine")
     WORKFLOW_FILENAME = "main.yml"
     SANDBOX_BRANCH = "staging-sandbox"
     MAIN_BRANCH = "main"
 
     # --- 3. إعدادات قاعدة البيانات السحابية (Supabase) ---
-    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-    SUPABASE_PUB_KEY = os.getenv("SUPABASE_PUB_KEY", "")
-    SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+    SUPABASE_URL = get_env("SUPABASE_URL", "https://maabijsnlytxewkscvam.supabase.co")
+    SUPABASE_PUB_KEY = get_env("SUPABASE_PUB_KEY", "")
+    SUPABASE_SECRET_KEY = get_env("SUPABASE_SECRET_KEY", "")
 
-    # --- 4. أسطول حسابات Kaggle ---
+    # --- 4. أسطول حسابات Kaggle (توزيع الأحمال 60 ساعة أسبوعياً) ---
     KAGGLE_FLEET = [
         {
             "id": "Node_1",
-            "username": os.getenv("KAGGLE_USER_1", ""),
-            "key": os.getenv("KAGGLE_KEY_1", ""),
+            "username": get_env("KAGGLE_USER_1", "mekozeko303"),
+            "key": get_env("KAGGLE_KEY_1", ""),
             "weekly_quota_hours": 30.0
         },
         {
             "id": "Node_2",
-            "username": os.getenv("KAGGLE_USER_2", ""),
-            "key": os.getenv("KAGGLE_KEY_2", ""),
+            "username": get_env("KAGGLE_USER_2", "zekomeko"),
+            "key": get_env("KAGGLE_KEY_2", ""),
             "weekly_quota_hours": 30.0
         }
     ]
@@ -39,16 +55,16 @@ class Config:
     # --- 5. مفاتيح الذكاء الاصطناعي والوسائط ---
     GEMINI_API_KEYS = [
         k for k in [
-            os.getenv("GEMINI_KEY_1", ""),
-            os.getenv("GEMINI_KEY_2", ""),
-            os.getenv("GEMINI_KEY_3", ""),
-            os.getenv("GEMINI_KEY_4", "")
+            get_env("GEMINI_KEY_1", ""),
+            get_env("GEMINI_KEY_2", ""),
+            get_env("GEMINI_KEY_3", ""),
+            get_env("GEMINI_KEY_4", "")
         ] if k
     ]
-    HF_TOKEN = os.getenv("HF_TOKEN", "")
-    PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "")
+    HF_TOKEN = get_env("HF_TOKEN", "")
+    PIXABAY_API_KEY = get_env("PIXABAY_API_KEY", "")
 
-    # --- 6. الأوضاع الـ 17 (كما هي بدون تغيير) ---
+    # --- 6. الأوضاع الـ 17 الإمبراطورية (مع صورة معاينة وفيديو تذكيري لكل وضع) ---
     DEFAULT_MODES = {
         "fast": {
             "name": "⚡ الوضع السريع",
@@ -205,6 +221,7 @@ class Config:
         }
     }
 
+
 class KeyRotator:
     def __init__(self):
         self.gemini_cycle = itertools.cycle(Config.GEMINI_API_KEYS) if Config.GEMINI_API_KEYS else None
@@ -215,5 +232,6 @@ class KeyRotator:
 
     def get_kaggle_node(self):
         return next(self.kaggle_cycle)
+
 
 rotator = KeyRotator()
