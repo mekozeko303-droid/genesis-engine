@@ -5,8 +5,18 @@ import urllib.parse
 import random
 import aiohttp
 import edge_tts
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter, ImageOps
-from config import HF_TOKEN, PIXABAY_API_KEY, SUPPORTED_LANGUAGES
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
+import config
+
+HF_TOKEN = getattr(config, "HF_TOKEN", "")
+PIXABAY_API_KEY = getattr(config, "PIXABAY_API_KEY", "")
+DEFAULT_LANGUAGES = {
+    "ar": {"name": "العربية", "male_voice": "ar-SA-HamedNeural", "female_voice": "ar-EG-SalmaNeural", "kids_voice": "ar-AE-FatimaNeural", "rate": "-2%", "pitch": "-1Hz"},
+    "ar_ye": {"name": "اليمنية", "male_voice": "ar-YE-SalehNeural", "female_voice": "ar-YE-MaryamNeural", "kids_voice": "ar-YE-MaryamNeural", "rate": "+0%", "pitch": "+0Hz"},
+    "en": {"name": "English", "male_voice": "en-US-AndrewMultilingualNeural", "female_voice": "en-US-AvaMultilingualNeural", "kids_voice": "en-US-AnaNeural", "rate": "+0%", "pitch": "+0Hz"}
+}
+SUPPORTED_LANGUAGES = getattr(config, "SUPPORTED_LANGUAGES", DEFAULT_LANGUAGES)
+
 
 class StudioMediaEngine:
     def __init__(self):
@@ -16,7 +26,14 @@ class StudioMediaEngine:
 
     def _run_ffmpeg(self, cmd):
         try:
-            res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+            res = subprocess.run(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=120
+            )
             return res.returncode == 0, res.stderr
         except Exception as e:
             return False, str(e)
@@ -31,12 +48,9 @@ class StudioMediaEngine:
         except Exception:
             return 5.0
 
-    # ==========================================================
-    # 1. توليد الصوت البشري الفائق + خلط موسيقى خلفية سينمائية
-    # ==========================================================
     async def generate_human_voice(self, text, output_path, voice_id="ar-SA-HamedNeural", rate="-2%", pitch="-1Hz", mood="epic"):
         raw_voice = output_path.replace(".mp3", "_raw.mp3")
-        clean_text = text.replace('"', '').replace("'", "").strip()
+        clean_text = str(text).replace('"', '').replace("'", "").strip()
         if not clean_text:
             clean_text = "..."
 
@@ -62,12 +76,10 @@ class StudioMediaEngine:
                 tts.save(raw_voice)
                 success = True
             except Exception:
-                # توليد ملف صوتي صامت في الحالات القصوى
                 self._run_ffmpeg(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t 4 "{raw_voice}"')
 
         dur = self._get_audio_duration(raw_voice)
 
-        # إضافة خلفية موسيقية سينمائية ناعمة وماسترينغ صوتي ليبدو كاستوديو حقيقي
         if mood == "upbeat":
             synth_expr = "0.04*sin(2*PI*220*t)+0.03*sin(2*PI*330*t)+0.02*sin(2*PI*440*t)"
         elif mood == "dramatic":
@@ -76,7 +88,7 @@ class StudioMediaEngine:
             synth_expr = "0.05*sin(2*PI*98*t)+0.03*sin(2*PI*147*t)+0.02*sin(2*PI*196*t)"
 
         mix_cmd = (
-            f'ffmpeg -y -i "{raw_voice}" -f lavfi -i "aevalsrc=\'{synth_expr}\':s=44100:d={dur}" '
+            f'ffmpeg -y -i "{raw_voice}" -f lavfi -i "aevalsrc={synth_expr}:s=44100:d={dur}" '
             f'-filter_complex "[0:a]volume=1.35[v];[1:a]afade=t=in:st=0:d=0.5,afade=t=out:st={max(0.5, dur-0.8)}:d=0.8[bg];'
             f'[v][bg]amix=inputs=2:duration=first:dropout_transition=1" -c:a libmp3lame -q:a 2 "{output_path}"'
         )
@@ -86,16 +98,12 @@ class StudioMediaEngine:
                 os.replace(raw_voice, output_path)
         return dur
 
-    # ==========================================================
-    # 2. محرك الصور رباعي الطبقات (يمنع الشاشة السوداء 100%)
-    # ==========================================================
     async def fetch_real_scene_image(self, visual_prompt, search_query, output_jpg, aspect="16:9", mode="hybrid", scene_num=1):
         target_w, target_h = (720, 1280) if aspect == "9:16" else (1280, 720)
         seed = random.randint(1000, 999999)
-        headers_ browser = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers_browser = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25)) as session:
-            # الطبقة 1: محرك HuggingFace FLUX.1-Schnell السريع باستخدام مفتاحك
             if HF_TOKEN and HF_TOKEN.startswith("hf_"):
                 hf_models = [
                     "black-forest-labs/FLUX.1-schnell",
@@ -116,7 +124,6 @@ class StudioMediaEngine:
                     except Exception:
                         continue
 
-            # الطبقة 2: محرك Pollinations Flux المباشر
             for model_name in ["flux", "turbo"]:
                 try:
                     encoded_p = urllib.parse.quote(visual_prompt[:380])
@@ -132,11 +139,10 @@ class StudioMediaEngine:
                 except Exception:
                     continue
 
-            # الطبقة 3: محرك Pixabay للصور الفوتوغرافية الحقيقية
             if PIXABAY_API_KEY:
                 for q in [search_query, "cinematic nature", "landscape"]:
                     try:
-                        enc_q = urllib.parse.quote(q)
+                        enc_q = urllib.parse.quote(str(q))
                         px_url = f"https://pixabay.com/api/?key={PIXABAY_API_KEY}&q={enc_q}&image_type=photo&per_page=10"
                         async with session.get(px_url, headers=headers_browser) as resp:
                             if resp.status == 200:
@@ -155,7 +161,6 @@ class StudioMediaEngine:
                     except Exception:
                         continue
 
-        # الطبقة 4: لوحة فنية سينمائية مولدة برمجياً (تمنع الشاشة السوداء حتى لو انقطع الإنترنت)
         self._create_stylized_artwork(output_jpg, target_w, target_h, mode, scene_num)
         return True
 
@@ -165,7 +170,6 @@ class StudioMediaEngine:
                 im = im.convert("RGB")
                 im = ImageOps.fit(im, (target_w, target_h), method=Image.Resampling.LANCZOS)
 
-                # تطبيق فلاتر ألوان حقيقية حسب الوضع المختار ليظهر الفرق البصري فوراً
                 if mode == "kids":
                     im = ImageEnhance.Color(im).enhance(1.45)
                     im = ImageEnhance.Brightness(im).enhance(1.08)
@@ -177,7 +181,6 @@ class StudioMediaEngine:
                     im = ImageEnhance.Color(im).enhance(1.3)
                     im = ImageEnhance.Sharpness(im).enhance(1.4)
                 elif mode == "news":
-                    # شريط إخباري احترافي أسفل الصورة في وضع الأخبار
                     draw = ImageDraw.Draw(im)
                     bar_h = int(target_h * 0.12)
                     draw.rectangle([0, target_h - bar_h, target_w, target_h], fill=(15, 25, 45))
@@ -206,14 +209,10 @@ class StudioMediaEngine:
             draw.line([(0, y), (w, y)], fill=(r, g, b))
         img.save(img_path, "JPEG", quality=92)
 
-    # ==========================================================
-    # 3. تحريك المشهد سينمائياً (Ken Burns Zoom & Pan)
-    # ==========================================================
     def render_animated_scene(self, image_path, audio_path, output_mp4, duration, scene_idx=1, aspect="16:9"):
         w, h = (720, 1280) if aspect == "9:16" else (1280, 720)
         frames = max(75, int(duration * 25) + 10)
 
-        # تنويع حركة الكاميرا بين المشاهد (تقريب، تبعيد، تحريك يمين/يسار)
         if scene_idx % 3 == 1:
             z_expr = "min(zoom+0.0016,1.28)"
             x_expr = "iw/2-(iw/zoom/2)"
@@ -241,7 +240,6 @@ class StudioMediaEngine:
         )
         ok, _ = self._run_ffmpeg(cmd)
         if not ok or not os.path.exists(output_mp4) or os.path.getsize(output_mp4) < 1000:
-            # خطة بديلة مضمونة تستخدم نفس الصورة الحقيقية (مستحيل تخرج شاشة سوداء)
             fallback_cmd = (
                 f'ffmpeg -y -loop 1 -i "{image_path}" -i "{audio_path}" '
                 f'-vf "scale={w}:{h},format=yuv420p" -c:v libx264 -preset ultrafast '
@@ -250,9 +248,6 @@ class StudioMediaEngine:
             self._run_ffmpeg(fallback_cmd)
         return os.path.exists(output_mp4)
 
-    # ==========================================================
-    # 4. الإنتاج الكامل للفيديو من مخطط الوكلاء الـ 20
-    # ==========================================================
     async def produce_full_video(self, blueprint, status_callback=None, custom_face_path=None):
         scenes = blueprint.get("scenes", [])
         mode = blueprint.get("mode", "hybrid")
@@ -273,7 +268,6 @@ class StudioMediaEngine:
             aud_path = os.path.join(self.work_dir, f"aud_{session_id}_{sc_num}.mp3")
             vid_path = os.path.join(self.work_dir, f"vid_{session_id}_{sc_num}.mp4")
 
-            # 1. توليد الصوت البشري مع الموسيقى التصويرية
             dur = await self.generate_human_voice(
                 text=sc.get("narration_ar", ""),
                 output_path=aud_path,
@@ -283,7 +277,6 @@ class StudioMediaEngine:
                 mood=mood
             )
 
-            # 2. جلب أو توليد الصورة الحقيقية للمشهد
             await self.fetch_real_scene_image(
                 visual_prompt=sc.get("visual_prompt_en", ""),
                 search_query=sc.get("search_query_en", "cinematic"),
@@ -293,11 +286,9 @@ class StudioMediaEngine:
                 scene_num=sc_num
             )
 
-            # إذا كان هناك وجه مرفوع للاستنساخ، يتم دمجه بصرياً
             if custom_face_path and os.path.exists(custom_face_path):
                 self._apply_smart_face_composite(custom_face_path, img_path)
 
-            # 3. تحريك المشهد وإخراجه كفيديو
             if self.render_animated_scene(img_path, aud_path, vid_path, dur, scene_idx=sc_num, aspect=aspect):
                 scene_videos.append(vid_path)
 
@@ -316,12 +307,9 @@ class StudioMediaEngine:
             return scene_videos[0]
         return final_output
 
-    # ==========================================================
-    # 5. استوديو الستوري والريلز الشخصي (من صور المستخدم وصوته بدون تشويه)
-    # ==========================================================
     async def produce_personal_story_reel(self, photo_paths, caption_text="", custom_audio_path=None, lang_code="ar"):
         session_id = random.randint(10000, 99999)
-        w, h = 720, 1280  # أبعاد ستوري وريلز عمودية احترافية (9:16)
+        w, h = 720, 1280
         prepared_imgs = []
 
         for idx, p_path in enumerate(photo_paths):
@@ -331,7 +319,6 @@ class StudioMediaEngine:
             try:
                 with Image.open(p_path) as im:
                     im = im.convert("RGB")
-                    # خلفية ضبابية فخمة (Blurred Backdrop) للحفاظ على كامل أبعاد صورتك الشخصية دون قص أو مط!
                     bg = ImageOps.fit(im, (w, h), method=Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(28))
                     bg = ImageEnhance.Brightness(bg).enhance(0.65)
 
@@ -351,13 +338,12 @@ class StudioMediaEngine:
         if not prepared_imgs:
             return None
 
-        # إعداد الصوت للستوري (إما صوتك المرفوع مباشرة أو تعليق صوتي + موسيقى إيقاعية)
         story_audio = os.path.join(self.work_dir, f"story_audio_{session_id}.mp3")
         if custom_audio_path and os.path.exists(custom_audio_path):
             story_audio = custom_audio_path
             total_dur = self._get_audio_duration(story_audio)
         elif caption_text and len(caption_text.strip()) > 2:
-            lang_info = SUPPORTED_LANGUAGES.get(lang_code, SUPPORTED_LANGUAGES["ar"])
+            lang_info = SUPPORTED_LANGUAGES.get(lang_code, DEFAULT_LANGUAGES["ar"])
             total_dur = await self.generate_human_voice(
                 caption_text, story_audio, voice_id=lang_info["male_voice"], mood="upbeat"
             )
@@ -365,7 +351,7 @@ class StudioMediaEngine:
         else:
             total_dur = max(6.0, len(prepared_imgs) * 3.5)
             synth = "0.06*sin(2*PI*220*t)+0.04*sin(2*PI*330*t)+0.03*sin(2*PI*440*t)"
-            self._run_ffmpeg(f'ffmpeg -y -f lavfi -i "aevalsrc=\'{synth}\':s=44100:d={total_dur}" -c:a libmp3lame "{story_audio}"')
+            self._run_ffmpeg(f'ffmpeg -y -f lavfi -i "aevalsrc={synth}:s=44100:d={total_dur}" -c:a libmp3lame "{story_audio}"')
 
         per_slide_dur = max(2.8, total_dur / len(prepared_imgs))
         clip_paths = []
@@ -397,14 +383,10 @@ class StudioMediaEngine:
         self._run_ffmpeg(mux_cmd)
         return final_story if os.path.exists(final_story) else merged_silent
 
-    # ==========================================================
-    # 6. محرك استنساخ الوجه والصورة على الفيديو (Face Swap & Cloning)
-    # ==========================================================
     def _apply_smart_face_composite(self, face_img_path, target_scene_path):
         try:
             with Image.open(target_scene_path).convert("RGB") as bg, Image.open(face_img_path).convert("RGB") as face:
                 bw, bh = bg.size
-                # دمج احترافي لصورتك داخل المشهد السينمائي مع إطار ضوئي ناعم (Soft Vignette Mask)
                 target_size = int(min(bw, bh) * 0.42)
                 face_cropped = ImageOps.fit(face, (target_size, target_size), method=Image.Resampling.LANCZOS)
 
@@ -436,7 +418,6 @@ class StudioMediaEngine:
                 im.putalpha(mask)
                 im.save(overlay_circle, "PNG")
 
-            # دمج الوجه المتحدث مع تحسين ألوان الفيديو الأصلي وإضافة الصوت البشري إذا طُلب
             vf_filter = (
                 f"[1:v]scale=220:220[face];"
                 f"[0:v]eq=contrast=1.12:saturation=1.18[bg];"
@@ -460,5 +441,6 @@ class StudioMediaEngine:
         except Exception:
             pass
         return video_path
+
 
 media_engine = StudioMediaEngine()
