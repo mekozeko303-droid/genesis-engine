@@ -7,7 +7,7 @@ from quota_manager import quota_system
 
 class StudioBoardroom:
     def __init__(self):
-        self.agents_ descriptions = {
+        self.agents_descriptions = {
             1: "المخرج السينمائي (Director): يضع الرؤية البصرية وزوايا الكاميرا.",
             2: "طبيب السيناريو والخطاف (Story Doctor & Hook): يضمن أول 3 ثوانٍ صادمة وتصاعداً درامياً مشوقاً.",
             3: "المدقق التاريخي والمنطقي (Fact-Checker): يمنع أي أخطاء تاريخية أو تشويه للمعالم الحقيقية.",
@@ -79,6 +79,7 @@ class StudioBoardroom:
         draft = await self.call_gemini(init_prompt)
         debate_log.append("🎬 **المخرج وطبيب السيناريو:** وضعا المسودة الأولى مع خطاف افتتاحي (Hook) قوي.")
 
+        critique = ""
         # حلقات النقد والتنقيح والوصول للإجماع
         for round_num in range(1, MAX_DEBATE_ROUNDS + 1):
             critique_prompt = (
