@@ -22,12 +22,13 @@ class GenesisDatabase:
     def _init_local_cache(self):
         if not os.path.exists(self.local_file):
             initial_data = {
+                "schema_version": 8,
                 "modes": Config.DEFAULT_MODES,
                 "cloned_video_ids": {},
                 "api_keys": {},
                 "lessons": [
-                    {"context": "hands", "rule": "Always add 'perfect anatomy, five fingers' and avoid extreme close-ups on hands."},
-                    {"context": "faces", "rule": "Apply CodeFormer restoration and use 'detailed expressive eyes, natural skin texture'."}
+                    {"context": "consistency", "rule": "Maintain exact character clothing, facial features, and environment across all scenes."},
+                    {"context": "anatomy", "rule": "Always enforce 'perfect anatomy, expressive eyes, natural motion'."}
                 ],
                 "quota": {
                     "used_pct": 0.0,
@@ -40,14 +41,14 @@ class GenesisDatabase:
         else:
             data = self._load_local()
             stored_modes = data.get("modes", {})
+            # إذا كانت النسخة قديمة تحتوي على فيديوهات الدوائر الملونة، يتم تصفير sample_file_id لتوليد فيديوهات حقيقية
+            reset_samples = data.get("schema_version", 0) < 8
             clean_modes = {}
 
-            # تحديث الأوضاع الـ 17 الأساسية دائماً بأحدث وصف نظيف مع الاحتفاظ بـ sample_file_id
             for k, v in Config.DEFAULT_MODES.items():
-                old_sample = stored_modes.get(k, {}).get("sample_file_id", "")
+                old_sample = "" if reset_samples else stored_modes.get(k, {}).get("sample_file_id", "")
                 clean_modes[k] = {**v, "sample_file_id": old_sample}
 
-            # تصفية الأوضاع المضافة سابقاً وحذف أي وضع مكرر مع الأوضاع الـ 17
             for k, v in stored_modes.items():
                 if k not in Config.DEFAULT_MODES:
                     is_dup, _ = self._check_against_dict(
@@ -57,8 +58,11 @@ class GenesisDatabase:
                         v.get("style", "")
                     )
                     if not is_dup:
+                        if reset_samples:
+                            v["sample_file_id"] = ""
                         clean_modes[k] = v
 
+            data["schema_version"] = 8
             data["modes"] = clean_modes
             data.setdefault("cloned_video_ids", {})
             data.setdefault("pending_upgrades", {})
@@ -71,6 +75,7 @@ class GenesisDatabase:
                 return json.load(f)
         except Exception:
             fallback = {
+                "schema_version": 8,
                 "modes": Config.DEFAULT_MODES,
                 "cloned_video_ids": {},
                 "api_keys": {},
@@ -110,7 +115,6 @@ class GenesisDatabase:
                 f"{info.get('name', '')} {info.get('desc', '')} {info.get('style', '')} {' '.join(existing_keywords)}"
             )
 
-            # إذا اشترك الوضع الجديد مع وضع حالي في الكلمات الجوهرية (مثل سينمائي/فيروسي/سريع/كرتون...) يُرفض فوراً
             overlap = new_tokens.intersection(existing_tokens)
             keyword_hits = new_tokens.intersection({k.removeprefix("ال").lower() for k in existing_keywords})
 
@@ -172,6 +176,14 @@ class GenesisDatabase:
     def get_api_key(self, service_name):
         data = self._load_local()
         return data.get("api_keys", {}).get(service_name.upper()) or os.getenv(service_name.upper(), "").strip()
+
+    def save_lesson(self, context_tag, rule_learned):
+        data = self._load_local()
+        lesson = {"context": context_tag, "rule": rule_learned, "timestamp": int(time.time())}
+        data.setdefault("lessons", []).append(lesson)
+        if len(data["lessons"]) > 30:
+            data["lessons"] = data["lessons"][-30:]
+        self._save_local(data)
 
     def get_relevant_lessons(self):
         lessons = self._load_local().get("lessons", [])
