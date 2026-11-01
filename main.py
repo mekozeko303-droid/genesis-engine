@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import threading
 import asyncio
 from pyrogram import Client, filters, idle
 from pyrogram.errors import FloodWait
@@ -9,8 +10,8 @@ from config import Config
 from database import db
 from sentinel_evolution import sentinel, video_engine, viral_engine, boardroom
 
-if not Config.BOT_TOKEN:
-    print("❌ خطأ: لم يتم العثور على TELEGRAM_BOT_TOKEN في GitHub Secrets!")
+if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
+    print("❌ خطأ صارم: مفاتيح تيليجرام (API_ID / API_HASH / BOT_TOKEN) مفقودة!")
     sys.exit(1)
 
 app = Client(
@@ -21,47 +22,57 @@ app = Client(
     in_memory=True
 )
 
-START_TIME = time.time()
-PROCESSED_MESSAGES = set()
 USER_STATE = {}
 
 
+def start_threaded_watchdog():
+    """مؤقت مستقل عبر مكتبة threading يغلق السيرفر بأمان عند الدقيقة 345 لإعادة البعث التلقائي 24/7"""
+    def _watchdog_worker():
+        time.sleep(345 * 60)
+        print("⏰ Watchdog (345m): Triggering self-respawn before 6h limit...")
+        sentinel.trigger_self_respawn()
+        time.sleep(8)
+        os._exit(0)
+
+    t = threading.Thread(target=_watchdog_worker, daemon=True)
+    t.start()
+
+
 def get_main_dashboard(user_id):
-    selected_mode = USER_STATE.get(user_id, {}).get("mode", "hybrid")
+    selected_mode = USER_STATE.get(user_id, {}).get("mode", "cinematic")
     modes = db.get_all_modes()
-    m_info = modes.get(selected_mode, modes["hybrid"])
+    m_info = modes.get(selected_mode, modes["cinematic"])
     est_time = m_info.get("est_time", "40 إلى 60 ثانية")
     quota = db.get_quota_status()
-    health_note = boardroom.inspect_system_health_and_requirements()
+    agent_msg = boardroom.build_agent_greeting_and_requirements()
 
     text = (
-        "👑 **إمبراطورية Genesis Engine الخالدة (v9.0 Full Multi-Agent Studio)**\n"
+        "🎬 **استوديو Genesis السينمائي الخالد (Higgsfield Multi-Agent Edition)**\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "🤖 **حالة مجلس الوكلاء الـ 6:** `نشط بالكامل (استقبال • إخراج • رسم • صوت • ريندر ذاتي • تطوير)`\n"
-        f"🎯 **الوضع النشط حالياً:** `{m_info['name']}`\n"
-        f"⏱️ **مدة تجهيز الفيديو:** `{est_time}`\n"
-        f"📝 **وصف الوضع:** {m_info.get('desc', '')}\n"
-        f"🔋 **رصيد المعالجة اليومي المتبقي:** `{quota['remaining_pct']}%` (يتجدد بعد `{quota['reset_in']}`)\n"
+        f"🎯 **الوضع السينمائي النشط:** `{m_info['name']}`\n"
+        f"⏱️ **مدة الريندر والإنتاج:** `{est_time}`\n"
+        f"📖 **طبيعة الوضع:** {m_info.get('desc', '')}\n"
+        f"🔋 **رصيد الإنتاج اليومي المتبقي:** `{quota['remaining_pct']}%` (يتجدد بعد `{quota['reset_in']}`)\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "✍️ **اكتب الآن أي فكرة فيديو في العالم (ماين كرافت، كرتون بيكسار، ديزني، بشري واقعي، أنمي، POV) وسيتولى الوكلاء الـ 6 إنتاجه وإرساله لك كملف (`.mp4`)!**"
+        f"{agent_msg}\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "✍️ **اكتب الآن فكرة الفيديو (أكشن سنمائي مثل Cully Hill Boys، مباراة ماين كرافت، كرتون بيكسار، ديزني، أنمي، POV) وسيتولى وكلاء الإخراج صناعته وإرساله لك كملف (`.mp4`)!**"
     )
-    if health_note:
-        text += f"\n\n{health_note}"
 
     buttons = [
         [
             InlineKeyboardButton("🎬 الأوضاع الـ 17 (مع فيديو مثال لكل وضع)", callback_data="menu_modes_0"),
-            InlineKeyboardButton("🤖 غرفة عمليات الوكلاء", callback_data="menu_quota")
+            InlineKeyboardButton("🤖 غرفة وكلاء الإنتاج", callback_data="menu_quota")
         ],
         [
-            InlineKeyboardButton("🔥 رادار التريندات والتعلم الفيروسي (أعلى مشاهدات)", callback_data="menu_viral_radar")
+            InlineKeyboardButton("🔥 رادار التريندات الفيروسية (أعلى مشاهدات)", callback_data="menu_viral_radar")
         ],
         [
-            InlineKeyboardButton("🔬 وكيل فحص الأخبار واكتشاف الأدوات الجديدة", callback_data="menu_eval_news")
+            InlineKeyboardButton("🎥 ترقية محركات الفيديو والصوت", callback_data="menu_eval_news")
         ],
         [
-            InlineKeyboardButton("🧬 وكيل استنساخ وضع جديد (مانع للتكرار)", callback_data="menu_clone_style"),
-            InlineKeyboardButton("🔑 تزويد الوكلاء بمفتاح API", callback_data="menu_add_key")
+            InlineKeyboardButton("🧬 استنساخ ستايل فيديو جديد", callback_data="menu_clone_style"),
+            InlineKeyboardButton("🔑 تزويد الوكلاء بمفتاح GPU/Video", callback_data="menu_add_key")
         ]
     ]
     return text, InlineKeyboardMarkup(buttons)
@@ -103,82 +114,73 @@ async def execute_upgrade_flow(client, chat_id, uid, upg_id, status_message=None
             await client.send_message(chat_id, msg)
         return
 
-    wait_text = f"🛠️ **وكيل التطوير الذاتي:** جاري اختبار وتجهيز (`{upg['tool_name']}`) في البيئة المعزولة (`{Config.SANDBOX_BRANCH}`)..."
+    wait_text = f"🎥 **وكيل هندسة الفيديو:** جاري معايرة ودمج محرك (`{upg['tool_name']}`)..."
     msg_obj = await status_message.edit_text(wait_text) if status_message else await client.send_message(chat_id, wait_text)
 
     ok, sandbox_msg = await asyncio.to_thread(
         sentinel.test_in_sandbox_branch,
         upg_id,
         upg["tool_name"],
-        upg.get("integration_code_snippet", "# Verified Plugin\n")
+        upg.get("integration_code_snippet", "")
     )
     if ok:
         ok_merge, merge_msg = await asyncio.to_thread(sentinel.merge_sandbox_to_main, upg_id)
         USER_STATE[uid]["action"] = None
         await msg_obj.edit_text(
-            f"🧪 **تقرير وكيل البيئة المعزولة:** {sandbox_msg}\n\n"
-            f"🚀 **تقرير وكيل الدمج النهائي:** {merge_msg}\n\n"
-            "✨ **تمت إضافة الأداة إلى ترسانة الوكلاء بنجاح!**",
+            f"🎬 **تقرير المعايرة:** {sandbox_msg}\n\n"
+            f"🚀 **حالة التفعيل:** {merge_msg}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
-        )
-    else:
-        await msg_obj.edit_text(
-            f"⚠️ **تقرير وكيل البيئة المعزولة:**\n{sandbox_msg}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]])
         )
 
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message):
-    if message.id in PROCESSED_MESSAGES:
-        return
-    PROCESSED_MESSAGES.add(message.id)
-    USER_STATE.setdefault(message.from_user.id, {"mode": "hybrid", "action": None})
+    USER_STATE.setdefault(message.from_user.id, {"mode": "cinematic", "action": None})
     USER_STATE[message.from_user.id]["action"] = None
     text, markup = get_main_dashboard(message.from_user.id)
-    await message.reply_text(text, reply_markup=markup)
+    await message.reply_text(text, disable_web_page_preview=True, reply_markup=markup)
 
 
 @app.on_callback_query()
 async def handle_callbacks(client, cq):
     uid = cq.from_user.id
     data = cq.data
-    USER_STATE.setdefault(uid, {"mode": "hybrid", "action": None})
+    USER_STATE.setdefault(uid, {"mode": "cinematic", "action": None})
 
     if data == "menu_home":
         USER_STATE[uid]["action"] = None
         text, markup = get_main_dashboard(uid)
         if cq.message.photo or cq.message.video:
             await cq.message.delete()
-            await client.send_message(uid, text, reply_markup=markup)
+            await client.send_message(uid, text, disable_web_page_preview=True, reply_markup=markup)
         else:
-            await cq.message.edit_text(text, reply_markup=markup)
+            await cq.message.edit_text(text, disable_web_page_preview=True, reply_markup=markup)
 
     elif data == "menu_viral_radar":
-        wait_v = await cq.message.edit_text("🔥 **وكيل الرادار الفيروسي:** جاري سحب التريندات الحية وتحديث خوارزمية المشاهدات...")
+        wait_v = await cq.message.edit_text("🔥 **وكيل الرادار الفيروسي:** جاري سحب التريندات الحية وتحديث قواعد التصوير السينمائي...")
         viral_info = await asyncio.to_thread(viral_engine.learn_new_viral_rule_from_web)
         trends_str = " ، ".join(viral_info["trends"][:6])
         suggested_topic = viral_info["suggested_viral_topic"]
         USER_STATE[uid]["suggested_trend"] = suggested_topic
 
         msg = (
-            "🔥 **تقرير وكيل التريندات والتعلم الفيروسي الحي:**\n"
+            "🔥 **تقرير وكيل التريندات والإخراج الفيروسي:**\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🌍 **المواضيع الأكثر رواجاً الآن:**\n`{trends_str}`\n\n"
-            f"🧠 **القاعدة الفيروسية التي أضافها الوكيل لذاكرة الإخراج الآن:**\n{viral_info['rule_ar']}\n\n"
-            f"💡 **فكرة مقترحة جاهزة للإنتاج الفوري:**\n`{suggested_topic}`"
+            f"🌍 **المواضيع الرائجة الآن:**\n`{trends_str}`\n\n"
+            f"🎥 **قاعدة التصوير التي أضافها الوكيل لذاكرة الإخراج:**\n{viral_info['rule_ar']}\n\n"
+            f"💡 **مشروع فيديو مقترح جاهز للتصوير الفوري:**\n`{suggested_topic}`"
         )
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"🎬 أنتج هذا الفيديو الآن", callback_data="produce_trend_now")],
-            [InlineKeyboardButton("🔄 استخراج قاعدة فيروسية جديدة", callback_data="menu_viral_radar")],
+            [InlineKeyboardButton("🎬 صوّر وأنتج هذا الفيديو الآن", callback_data="produce_trend_now")],
+            [InlineKeyboardButton("🔄 استخراج قاعدة تصوير جديدة", callback_data="menu_viral_radar")],
             [InlineKeyboardButton("🔙 اللوحة الرئيسية", callback_data="menu_home")]
         ])
         await wait_v.edit_text(msg, reply_markup=buttons)
 
     elif data == "produce_trend_now":
-        trend_topic = USER_STATE.get(uid, {}).get("suggested_trend", "مباراة كرة قدم بشخصيات ماين كرافت 3D")
+        trend_topic = USER_STATE.get(uid, {}).get("suggested_trend", "مباراة كرة قدم حماسية بشخصيات ماين كرافت 3D")
         await cq.message.delete()
-        status_msg = await client.send_message(uid, f"🔥 **مجلس الوكلاء:** جاري بدء إنتاج الفيديو الفيروسي عن: `{trend_topic}`")
+        status_msg = await client.send_message(uid, f"🎬 **مجلس وكلاء الإنتاج:** بدأ تصوير وريندر المشروع: `{trend_topic}`")
         asyncio.create_task(produce_video_for_topic(client, uid, trend_topic, status_msg))
 
     elif data.startswith("switch_produce_"):
@@ -186,14 +188,14 @@ async def handle_callbacks(client, cq):
         USER_STATE[uid]["mode"] = target_mode
         saved_topic = USER_STATE[uid].get("saved_topic", "مباراة كرة قدم بشخصيات ماين كرافت")
         await cq.message.delete()
-        status_msg = await client.send_message(uid, f"🤖 **وكيل التوجيه:** تم تحويلك للوضع المناسب وبدء إنتاج: `{saved_topic}`")
+        status_msg = await client.send_message(uid, f"🤖 **وكيل التوجيه:** تم تحويلك للوضع المناسب وبدء تصوير: `{saved_topic}`")
         asyncio.create_task(produce_video_for_topic(client, uid, saved_topic, status_msg))
 
     elif data.startswith("menu_modes_"):
         page = int(data.split("_")[-1])
         msg_text = (
-            f"🎬 **اختر وضع الإنتاج المطلوب (صفحة {page + 1}):**\n"
-            "*(بمجرد اختيار أي وضع، يعرض لك الوكلاء **فيديو مثال حقيقي `.mp4`** يوضح ستايل هذا الوضع)*"
+            f"🎬 **اختر وضع التصوير والإنتاج المطلوب (صفحة {page + 1}):**\n"
+            "*(عند اختيار أي وضع، يعرض لك الوكلاء **فيديو مثال حقيقي `.mp4`** يوضح ستايل هذا الوضع)*"
         )
         if cq.message.photo or cq.message.video:
             await cq.message.delete()
@@ -206,7 +208,7 @@ async def handle_callbacks(client, cq):
         USER_STATE[uid]["mode"] = mode_key
         USER_STATE[uid]["action"] = None
         modes = db.get_all_modes()
-        m_info = modes.get(mode_key, modes["hybrid"])
+        m_info = modes.get(mode_key, modes["cinematic"])
         default_mode = Config.DEFAULT_MODES.get(mode_key, {})
 
         for field in ["est_time", "voice", "afilt", "vfilter", "sample_topic", "desc", "style"]:
@@ -220,10 +222,10 @@ async def handle_callbacks(client, cq):
             f"📖 **وصف الوضع:**\n{m_info.get('desc', '')}\n\n"
             f"⏱️ **مدة التجهيز:** `{m_info.get('est_time', '40 إلى 60 ثانية')}` | ⚡ **الاستهلاك:** `{m_info['cost_pct']}%`\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "✍️ **اكتب الآن فكرة الفيديو مباشرة في المحادثة ليبدأ الوكلاء بإنتاجه وإرساله لك!**"
+            "✍️ **اكتب الآن فكرة الفيديو مباشرة في المحادثة ليبدأ الوكلاء بتصويره وإرساله لك!**"
         )
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📹 وضع فيديو تذكيري آخر من جهازي", callback_data=f"setsample_{mode_key}")],
+            [InlineKeyboardButton("📹 تثبيت فيديو تذكيري خاص من جهازي", callback_data=f"setsample_{mode_key}")],
             [
                 InlineKeyboardButton("🔄 تغيير الوضع", callback_data="menu_modes_0"),
                 InlineKeyboardButton("🏠 الرئيسية", callback_data="menu_home")
@@ -242,7 +244,7 @@ async def handle_callbacks(client, cq):
 
         wait_prev = await client.send_message(
             uid,
-            f"🎬 **وكيل المعاينة البصرية:** جاري تجهيز وعرض فيديو المثال الخاص بوضع ({m_info['name']})..."
+            f"🎬 **وكيل المعاينة السينمائية:** جاري تجهيز وعرض فيديو المثال الحقيقي لوضع ({m_info['name']})..."
         )
         try:
             mp4_sample = await video_engine.get_or_build_mode_sample(mode_key, m_info)
@@ -265,49 +267,45 @@ async def handle_callbacks(client, cq):
     elif data == "menu_quota":
         q = db.get_quota_status()
         lessons = db.get_relevant_lessons()
-        health = boardroom.inspect_system_health_and_requirements()
+        req_msg = boardroom.build_agent_greeting_and_requirements()
         msg = (
-            "🤖 **غرفة عمليات مجلس الوكلاء الـ 6 والذاكرة الحية:**\n"
+            "🤖 **غرفة عمليات وكلاء الإنتاج السينمائي:**\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "1️⃣ **وكيل الاستقبال والمتطلبات:** `متصل ✅`\n"
-            "2️⃣ **وكيل الإخراج وثبات الشخصيات:** `متصل ✅`\n"
-            "3️⃣ **وكيل الرسم متعدد المحركات (5 Engines):** `متصل ✅`\n"
-            "4️⃣ **وكيل الهندسة الصوتية العربية:** `متصل ✅`\n"
-            "5️⃣ **وكيل الريندر والإصلاح الذاتي (Self-Healing):** `متصل ✅`\n"
-            "6️⃣ **وكيل التطوير والرادار الفيروسي:** `متصل ✅`\n"
+            "1️⃣ **وكيل الاستقبال والمتطلبات:** `نشط ✅`\n"
+            "2️⃣ **وكيل السيناريو الهوليوودي (Higgsfield Brief):** `نشط ✅`\n"
+            "3️⃣ **وكيل ثبات الشخصيات والمشاهد:** `نشط ✅`\n"
+            "4️⃣ **وكيل الصوت العربي الطبيعي:** `نشط ✅`\n"
+            "5️⃣ **وكيل الكاميرا والمونتاج الذاتي:** `نشط ✅`\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔋 **المتبقي من حصة اليوم:** `{q['remaining_pct']}%` (يتجدد بعد `{q['reset_in']}`)\n"
-            f"🖥️ **العقدة النشطة:** `{q['active_node']}`\n\n"
-            f"🧠 **آخر القواعد المتعلمة في ذاكرة الوكلاء:**\n`{lessons}`"
+            f"🔋 **المتبقي من حصة اليوم:** `{q['remaining_pct']}%` (يتجدد بعد `{q['reset_in']}`)\n\n"
+            f"{req_msg}\n\n"
+            f"🧠 **قواعد التصوير النشطة في الذاكرة:**\n`{lessons}`"
         )
-        if health:
-            msg += f"\n\n{health}"
-        await cq.message.edit_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]]))
+        await cq.message.edit_text(msg, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]]))
 
     elif data == "menu_eval_news":
         USER_STATE[uid]["action"] = "awaiting_news"
         await cq.message.edit_text(
-            "🔬 **وكيل فحص الأخبار واكتشاف الأدوات (Truth Sentinel Agent):**\n\n"
-            "• اكتب اسم أي أداة سمعت عنها لفحصها ومقارنتها.\n"
-            "• أو اكتب **ابحث انت وقلي** ليبحث الوكيل عن أداة جديدة غير مكررة ويقترحها عليك!",
+            "🎥 **وكيل ترقية محركات الفيديو والصوت:**\n\n"
+            "اكتب **ابحث انت وقلي** أو اسم أي نموذج فيديو جديد (مثل `Higgsfield` أو `LTX-Video` أو `HunyuanVideo`) ليفحصه الوكيل ويدمجه في استوديو الإنتاج!",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
         )
 
     elif data == "menu_clone_style":
         USER_STATE[uid]["action"] = "awaiting_style_clone"
         await cq.message.edit_text(
-            "🧬 **وكيل الهندسة العكسية واستنساخ الأنماط (مع حارس عدم التكرار):**\n\n"
+            "🧬 **وكيل استنساخ الأنماط البصرية (مع حارس عدم التكرار):**\n\n"
             "أرسل الآن **الفيديو مع كتابة اسم النمط الجديد في الوصف** (أو اكتب وصف النمط الجديد).\n"
-            "⛔ *إذا كان النمط موجوداً ضمن الأوضاع الـ 17، سينبهك الوكيل ويرفض تكراره!*",
+            "⛔ *يرفض الوكيل تلقائياً أي نمط مكرر مع الأوضاع الـ 17 الموجودة!*",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
         )
 
     elif data == "menu_add_key":
         USER_STATE[uid]["action"] = "awaiting_manual_key"
         await cq.message.edit_text(
-            "🔑 **وكيل المصادقة وحفظ المفاتيح (API Handshake Agent):**\n\n"
-            "أرسل المفتاح بالصيغة التالية ليحفظه الوكيل في الذاكرة الدائمة فوراً:\n"
-            "`HF_TOKEN:hf_xxxxxx`\nأو\n`GEMINI_KEY_1:AIzaSyxxxxxx`",
+            "🔑 **وكيل تجهيز محركات الـ GPU والفيديو:**\n\n"
+            "أرسل مفتاح `HF_TOKEN` (يبدأ بـ `hf_...`) مباشرة في المحادثة لتفعيل الرسم السينمائي المباشر عبر بطاقات HuggingFace FLUX.1، أو أرسله بالصيغة:\n"
+            "`HF_TOKEN:hf_xxxxxx`",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
         )
 
@@ -317,9 +315,9 @@ async def handle_callbacks(client, cq):
 
 
 async def produce_video_for_topic(client, uid, topic_text, status_msg):
-    mode_key = USER_STATE.get(uid, {}).get("mode", "hybrid")
+    mode_key = USER_STATE.get(uid, {}).get("mode", "cinematic")
     modes = db.get_all_modes()
-    m_info = modes.get(mode_key, modes["hybrid"])
+    m_info = modes.get(mode_key, modes["cinematic"])
     default_mode = Config.DEFAULT_MODES.get(mode_key, {})
     for field in ["est_time", "voice", "afilt", "vfilter", "style"]:
         if field in default_mode:
@@ -330,8 +328,8 @@ async def produce_video_for_topic(client, uid, topic_text, status_msg):
     async def update_progress(step_text):
         try:
             await status_msg.edit_text(
-                f"🤖 **مجلس الوكلاء يعمل الآن على إنتاج مشروعك...**\n"
-                f"▪️ **الموضوع:** `{topic_text[:45]}`\n"
+                f"🎬 **استوديو الوكلاء يصنع الفيديو الخاص بك الآن...**\n"
+                f"▪️ **الفكرة:** `{topic_text[:45]}`\n"
                 f"▪️ **الوضع:** `{m_info['name']}` (المدة المقدرة: `{est_time}`)\n"
                 "━━━━━━━━━━━━━━━━━━━━━\n"
                 f"{step_text}"
@@ -349,11 +347,11 @@ async def produce_video_for_topic(client, uid, topic_text, status_msg):
     quota_after = db.consume_quota(m_info["cost_pct"])
 
     video_caption = (
-        f"✅ **أتم مجلس الوكلاء إنتاج الفيديو بنجاح!**\n"
-        f"🧲 **العنوان الفيروسي:**\n`{script_data.get('title_ar', '')}`\n\n"
-        f"🎙️ **السرد الصوتي العربي:**\n{script_data.get('voiceover_ar', '')}\n\n"
+        f"✅ **تم إنتاج الفيديو السينمائي بنجاح!**\n"
+        f"🎬 **العنوان:** `{script_data.get('title_ar', '')}`\n\n"
+        f"🎙️ **السيناريو الصوتي العربي:**\n{script_data.get('voiceover_ar', '')}\n\n"
         f"📈 **هاشتاجات الانتشار:**\n`{script_data.get('hashtags', '#اكسبلور #تريند')}`\n\n"
-        f"💬 **التعليق المثبت المقترح لرفع اللايكات:**\n`{script_data.get('pinned_comment', '')}`\n"
+        f"💬 **التعليق المثبت لرفع اللايكات:**\n`{script_data.get('pinned_comment', '')}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🔋 **الحصة المتبقية اليوم:** `{quota_after['remaining_pct']}%`"
     )
@@ -375,15 +373,23 @@ async def produce_video_for_topic(client, uid, topic_text, status_msg):
 
 @app.on_message((filters.text | filters.video) & filters.private)
 async def handle_user_input(client, message):
-    if message.id in PROCESSED_MESSAGES:
-        return
-    PROCESSED_MESSAGES.add(message.id)
-
     uid = message.from_user.id
-    USER_STATE.setdefault(uid, {"mode": "hybrid", "action": None})
+    USER_STATE.setdefault(uid, {"mode": "cinematic", "action": None})
     action = USER_STATE[uid].get("action")
-    mode_key = USER_STATE[uid].get("mode", "hybrid")
+    mode_key = USER_STATE[uid].get("mode", "cinematic")
     text = (message.text or message.caption or "").strip()
+
+    # التقاط المفاتيح تلقائياً بمجرد إرسالها في المحادثة في أي وقت
+    auto_key_name, auto_key_val = boardroom.detect_auto_api_key_in_message(text)
+    if auto_key_name and auto_key_val:
+        USER_STATE[uid]["action"] = None
+        db.save_api_key(auto_key_name, auto_key_val)
+        await message.reply_text(
+            f"✅ **وكيل التجهيز:** التقطتُ المفتاح `{auto_key_name}` وحفظته في الذاكرة الدائمة!\n"
+            "🚀 تم تفعيل محرك التوليد المباشر عبر بطاقات الـ GPU لجميع فيديوهاتك القادمة.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+        )
+        return
 
     if action and action.startswith("confirm_upgrade_"):
         upg_id = action.replace("confirm_upgrade_", "")
@@ -393,7 +399,7 @@ async def handle_user_input(client, message):
         elif text in ["لا", "الغي", "إلغاء", "رفض", "no"]:
             USER_STATE[uid]["action"] = None
             db.remove_pending_upgrade(upg_id)
-            await message.reply_text("❌ **وكيل التطوير:** تم إلغاء التحديث بناءً على أمرك.")
+            await message.reply_text("❌ تم إلغاء الترقية.")
             return
 
     if action and action.startswith("awaiting_sample_vid_"):
@@ -406,7 +412,7 @@ async def handle_user_input(client, message):
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 عرض الوضع الآن", callback_data=f"setmode_{target_mode}")]])
             )
         else:
-            await message.reply_text("⚠️ **وكيل الأرشيف:** يرجى إرسال ملف فيديو صالح.")
+            await message.reply_text("⚠️ يرجى إرسال ملف فيديو صالح.")
         return
 
     if action == "awaiting_style_clone":
@@ -429,7 +435,7 @@ async def handle_user_input(client, message):
             style_data["mode_id"],
             style_data["arabic_name"],
             style_data["style_prompt"],
-            desc=style_data.get("desc", "نمط مخصص"),
+            desc=style_data.get("desc", "نمط سينمائي مخصص"),
             sample_file_id=sample_fid,
             video_unique_id=vid_uniq
         )
@@ -437,61 +443,49 @@ async def handle_user_input(client, message):
         if not added_ok:
             await wait_msg.edit_text(
                 f"⛔ **وكيل منع التكرار: هذا الوضع موجود في نظامك من قبل!**\n\n"
-                f"🏷️ **الوضع الموجود عندك:** `{result_mode['name']}`\n"
-                f"📖 **وصفه:** {result_mode.get('desc', '')}",
+                f"🏷️ **الوضع الموجود عندك:** `{result_mode['name']}`",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎬 الذهاب للوضع الموجود", callback_data="menu_modes_0")]])
             )
             return
 
         USER_STATE[uid]["mode"] = style_data["mode_id"]
         await wait_msg.edit_text(
-            f"✅ **وكيل الهندسة العكسية:** تم التحقق من فرادة النمط وإضافته لنظامك!\n\n"
-            f"🏷️ **اسم الوضع الجديد:** `{result_mode['name']}`\n"
-            f"📖 **الوصف:** {result_mode['desc']}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👁️ فتح الوضع الجديد مع فيديو المثال", callback_data=f"setmode_{style_data['mode_id']}")]])
+            f"✅ **تمت إضافة الوضع الجديد بنجاح!**\n🏷️ **الاسم:** `{result_mode['name']}`",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👁️ فتح الوضع الجديد", callback_data=f"setmode_{style_data['mode_id']}")]])
         )
         return
 
     if message.video and mode_key == "cloning":
-        proc_msg = await message.reply_text(
-            "🧬 **وكيل ترميم الفيديو:** جاري قص العلامات المائية من الأطراف وترميم جودة الملامح والألوان..."
-        )
+        proc_msg = await message.reply_text("🧬 **وكيل ترميم الفيديو:** جاري قص العلامات المائية وترميم الجودة...")
         dl_path = await message.download(file_name=f"/tmp/input_{message.id}.mp4")
         cleaned_path = await video_engine.clean_and_enhance_video(dl_path)
         quota_after = db.consume_quota(8.0)
         await client.send_video(
             uid,
             cleaned_path,
-            caption=(
-                "✅ **أتم وكيل الترميم تنظيف الفيديو وتحسين الجودة بنجاح!**\n"
-                f"🔋 **الحصة المتبقية لك اليوم:** `{quota_after['remaining_pct']}%`"
-            ),
+            caption=f"✅ **تم تنظيف وترميم الفيديو بنجاح!**\n🔋 **الحصة المتبقية:** `{quota_after['remaining_pct']}%`",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
         )
         await proc_msg.delete()
         return
 
     if action == "awaiting_news":
-        wait_msg = await message.reply_text("🛰️ **وكيل التطوير الذاتي:** جاري فحص المنصات العالمية لجلب أداة حقيقية جديدة...")
+        wait_msg = await message.reply_text("🎥 **وكيل ترقية الفيديو:** جاري البحث عن أحدث محركات التصوير والريندر...")
         report = await asyncio.to_thread(sentinel.evaluate_user_news, text)
-
         upg_id = f"upg_{int(time.time()) % 100000}"
         db.save_pending_upgrade(upg_id, report)
         USER_STATE[uid]["action"] = f"confirm_upgrade_{upg_id}"
 
         reply = (
-            f"🔬 **تقرير وكيل الاكتشاف والفحص الهندسي حول: `{report.get('tool_name')}`**\n"
+            f"🎥 **تقرير وكيل ترقية محركات الفيديو حول: `{report.get('tool_name')}`**\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚖️ **قرار الوكيل:** 🟢 **أداة حقيقية موثقة وجاهزة للدمج الفوري**\n\n"
-            f"📊 **التفاصيل:**\n{report.get('comparison_ar')}\n\n"
-            "🔑 **هل تحتاج مفتاح API؟** `لا (تعمل مجاناً مباشرة)`\n"
+            f"{report.get('comparison_ar')}\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "❓ **هل تأمر الوكلاء بعمل التحديث والتطوير الآن؟**\n"
-            "*(فقط اكتب **نعم** أو اضغط على زر الموافقة بالأسفل)*"
+            "❓ **هل تريد تفعيل هذا المحرك في استوديو الإنتاج؟** *(اكتب **نعم** أو اضغط الزر)*"
         )
         buttons = [
-            [InlineKeyboardButton("✅ نعم، اعتمد التحديث والتطوير", callback_data=f"sandbox_test_{upg_id}")],
-            [InlineKeyboardButton("❌ لا، إلغاء", callback_data="menu_home")]
+            [InlineKeyboardButton("✅ نعم، فعّل المحرك الآن", callback_data=f"sandbox_test_{upg_id}")],
+            [InlineKeyboardButton("❌ إلغاء", callback_data="menu_home")]
         ]
         await wait_msg.edit_text(reply, reply_markup=InlineKeyboardMarkup(buttons))
         return
@@ -501,80 +495,51 @@ async def handle_user_input(client, message):
         if ":" in text:
             k_name, k_val = text.split(":", 1)
             db.save_api_key(k_name.strip(), k_val.strip())
-            await message.reply_text(f"✅ **وكيل المصادقة:** تم حفظ المفتاح `{k_name.strip()}` وتزويده لجميع الوكلاء بنجاح!")
+            await message.reply_text(f"✅ **تم حفظ المفتاح `{k_name.strip()}` وتزويده لوكلاء الفيديو بنجاح!**")
         else:
-            await message.reply_text("⚠️ **وكيل المصادقة:** يرجى إرسال المفتاح بالصيغة الصحيحة هكذا: `NAME:KEY`")
+            db.save_api_key("HF_TOKEN", text.strip())
+            await message.reply_text("✅ **تم حفظ المفتاح كـ `HF_TOKEN` لتوليد المشاهد السينمائية بنجاح!**")
         return
 
-    # فحص الطلب عبر وكيل الاستقبال والمتطلبات قبل بدء الإنتاج
     req_check = boardroom.analyze_user_request_requirements(text, bool(message.video), mode_key)
     if not req_check.get("ready"):
         USER_STATE[uid]["saved_topic"] = req_check.get("saved_topic", text)
         btns = []
         if req_check.get("suggest_switch_mode"):
             sm = req_check["suggest_switch_mode"]
-            btns.append([InlineKeyboardButton("🎬 نعم، حولني لوكيل الإنتاج واصنع الفيديو الآن!", callback_data=f"switch_produce_{sm}")])
+            btns.append([InlineKeyboardButton("🎬 نعم، صوّر وأنتج الفيديو الآن!", callback_data=f"switch_produce_{sm}")])
         btns.append([InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")])
         await message.reply_text(req_check["missing_msg"], reply_markup=InlineKeyboardMarkup(btns))
         return
 
     modes = db.get_all_modes()
-    m_info = modes.get(mode_key, modes["hybrid"])
+    m_info = modes.get(mode_key, modes["cinematic"])
     est_time = m_info.get("est_time", "40 إلى 60 ثانية")
-    quota_before = db.get_quota_status()
-
-    if quota_before["remaining_pct"] < m_info["cost_pct"]:
-        await message.reply_text(
-            f"⚠️ **وكيل الموارد:** رصيد اليوم ({quota_before['remaining_pct']}%) لا يكفي لهذا الوضع ({m_info['cost_pct']}%).\n"
-            f"⏳ سيتجدد الرصيد بالكامل بعد: `{quota_before['reset_in']}`."
-        )
-        return
 
     status_msg = await message.reply_text(
-        f"🤖 **استلم مجلس الوكلاء الـ 6 طلبك الآن!**\n"
+        f"🎬 **استلم وكلاء الإنتاج السينمائي مشروعك!**\n"
         f"▪️ **الموضوع:** `{text[:50]}`\n"
-        f"▪️ **الوضع النشط:** `{m_info['name']}`\n"
-        f"⏱️ **المدة المقدرة:** `{est_time}`\n"
+        f"▪️ **الوضع:** `{m_info['name']}` (المدة المقدرة: `{est_time}`)\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "⏳ *جاري التوجيه إلى وكيل الإخراج وثبات الشخصيات...*"
+        "⏳ *جاري كتابة القصة وتوليد اللقطات الحقيقية...*"
     )
     asyncio.create_task(produce_video_for_topic(client, uid, text or "مباراة كرة قدم بشخصيات ماين كرافت", status_msg))
 
 
-async def auto_viral_learning_daemon():
-    while True:
-        await asyncio.sleep(3600)
-        try:
-            await asyncio.to_thread(viral_engine.learn_new_viral_rule_from_web)
-        except Exception:
-            pass
-
-
-async def immortal_lifecycle_watchdog():
-    while True:
-        await asyncio.sleep(60)
-        elapsed_minutes = (time.time() - START_TIME) / 60.0
-        if elapsed_minutes >= 345:
-            sentinel.trigger_self_respawn()
-            await asyncio.sleep(10)
-            os._exit(0)
-
-
 async def start_genesis():
-    print("🚀 Starting Genesis Immortal Engine v9.0 (Full 6-Agent Autonomous Boardroom)...")
+    print("🚀 Starting Genesis Cinema Studio (Higgsfield Multi-Agent Edition)...")
+    start_threaded_watchdog()
     while True:
         try:
             await app.start()
             break
         except FloodWait as e:
             wait_sec = int(getattr(e, "value", 60)) + 5
-            print(f"⏳ Telegram FloodWait active: sleeping {wait_sec}s automatically...")
+            print(f"⏳ FloodWait active: sleeping {wait_sec}s...")
             await asyncio.sleep(wait_sec)
 
-    asyncio.create_task(immortal_lifecycle_watchdog())
-    asyncio.create_task(auto_viral_learning_daemon())
     asyncio.create_task(video_engine.prewarm_all_modes_background())
-    print("✅ All 6 Agents are online 24/7 and ready!")
+    print("✅ Cinema Multi-Agent Studio is online 24/7!")
     await idle()
     await app.stop()
 
