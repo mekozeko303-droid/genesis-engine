@@ -10,13 +10,12 @@ import subprocess
 import urllib.parse
 import xml.etree.ElementTree as ET
 import requests
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image
 from gtts import gTTS
 import edge_tts
 from config import Config, rotator
 from database import db
 
-# تحديد مسار FFmpeg تلقائياً سواء من النظام أو من حزمة بايثون المدمجة (يمنع خطأ Errno 2 نهائياً)
 try:
     import imageio_ffmpeg
     FFMPEG_BIN = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
@@ -29,6 +28,84 @@ except Exception:
     MP3 = None
 
 PREWARMED_VIDEOS = {}
+
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
+}
+
+# بروفايلات بصرية مخصصة لكل وضع لضمان اختلاف شكل كل وضع تماماً (بشري، طفولي، كرتوني، ديزني، أنمي، POV واقعي)
+MODE_VISUAL_SIGNATURES = {
+    "fast": {
+        "style_prefix": "Dynamic hyper-energetic viral shot, high contrast neon rim lighting, ultra-sharp action photography",
+        "sample_subject": "a futuristic street runner leaping across glowing cyberpunk rooftops at night"
+    },
+    "cinematic": {
+        "style_prefix": "Hollywood IMAX 70mm film still, photorealistic human actors, dramatic anamorphic lens flare, shallow depth of field, moody color grading",
+        "sample_subject": "a human detective in a trench coat walking through a rain-soaked neon alley at night"
+    },
+    "dialogue": {
+        "style_prefix": "Cinematic movie dialogue frame, expressive photorealistic human faces, warm indoor bokeh lighting, 50mm portrait lens",
+        "sample_subject": "two charismatic men having an intense conversation inside a classic wooden cafe"
+    },
+    "news": {
+        "style_prefix": "Live 4K television news broadcast footage, realistic photojournalism, crisp daylight lighting",
+        "sample_subject": "a professional TV news anchor reporting live in front of a futuristic robotics laboratory"
+    },
+    "hybrid": {
+        "style_prefix": "Epic blockbuster visual combining photorealistic historical grandeur and modern cinema lighting, 8k resolution",
+        "sample_subject": "an ancient golden pharaoh temple opening its gates under a cosmic starry sky"
+    },
+    "cloning": {
+        "style_prefix": "Ultra-detailed photorealistic human portrait, studio ring lighting, crystal clear skin texture and eyes, 85mm lens",
+        "sample_subject": "a close-up portrait of a futuristic cybernetic engineer scanning a holographic face"
+    },
+    "stickman": {
+        "style_prefix": "2D viral stickman cartoon illustration, simple black stick figure body, round white head with expressive cartoon eyes, clean flat vector background",
+        "sample_subject": "a funny 2D stickman character building a giant rocket ship on a green hill"
+    },
+    "anime": {
+        "style_prefix": "Masterpiece Japanese Anime frame, Studio Ghibli and Makoto Shinkai style, vibrant hand-painted cel shading, lush clouds and dramatic sunset",
+        "sample_subject": "a young anime samurai standing on a windy grass cliff overlooking a magical floating city"
+    },
+    "kids": {
+        "style_prefix": "Cute Disney Pixar 3D animated movie frame, adorable expressive 3D cartoon character, soft subsurface scattering, joyful bright colors, Unreal Engine 5 render",
+        "sample_subject": "a cute 8-year-old 3D Pixar cartoon boy in a red jersey dribbling a soccer ball on a sunny green stadium"
+    },
+    "story": {
+        "style_prefix": "Vertical 9:16 luxury lifestyle photography, golden hour sunlight, aesthetic social media reels composition",
+        "sample_subject": "a breathtaking first-person POV walk through a tropical Maldives overwater villa at sunset"
+    },
+    "ads": {
+        "style_prefix": "High-end luxury commercial product photography, slow-motion water splashes, dramatic studio rim lighting, macro 4k",
+        "sample_subject": "a royal gold perfume bottle surrounded by floating crystal water droplets and fire sparks"
+    },
+    "beatsync": {
+        "style_prefix": "Adrenaline-fueled drift car edit, motion blur, purple and cyan neon reflections, aggressive wide-angle lens",
+        "sample_subject": "a matte black sports car drifting through smoky neon-lit Tokyo streets at midnight"
+    },
+    "deepdive": {
+        "style_prefix": "National Geographic historical documentary recreation, dramatic chiaroscuro lighting, authentic ancient textures",
+        "sample_subject": "ancient builders raising massive stone obelisks under a dramatic desert sandstorm"
+    },
+    "ambient": {
+        "style_prefix": "Cozy atmospheric lo-fi aesthetic, warm fireplace glow, raindrops on glass window, peaceful night mood",
+        "sample_subject": "a warm wooden cabin living room with a crackling fireplace while rain falls outside in the dark forest"
+    },
+    "podcast": {
+        "style_prefix": "Professional dark moody podcast studio, close-up Shure SM7B microphone, warm neon wall sign, cinematic depth",
+        "sample_subject": "a charismatic host speaking into a professional studio microphone in a dark acoustic room"
+    },
+    "explainer": {
+        "style_prefix": "Clean modern 2D flat vector motion graphics illustration, Kurzgesagt educational style, vibrant geometric shapes",
+        "sample_subject": "a colorful 2D vector illustration of satellites orbiting planet Earth with glowing data beams"
+    },
+    "thriller": {
+        "style_prefix": "Dark psychological horror thriller cinematography, thick volumetric fog, eerie silhouettes, cold blue and shadow grading",
+        "sample_subject": "a mysterious shadowy figure standing under a flickering streetlamp in a foggy abandoned street"
+    }
+}
 
 
 class SmartCouncil:
@@ -43,7 +120,7 @@ class SmartCouncil:
                 }
                 if json_output:
                     payload["generationConfig"] = {"responseMimeType": "application/json"}
-                r = requests.post(url, json=payload, timeout=12)
+                r = requests.post(url, json=payload, timeout=15)
                 if r.status_code == 200:
                     return r.json()["candidates"][0]["content"]["parts"][0]["text"]
             except Exception:
@@ -57,7 +134,8 @@ class SmartCouncil:
             r = requests.post(
                 "https://text.pollinations.ai/",
                 json={"messages": messages, "model": "openai", "jsonMode": json_output},
-                timeout=12
+                headers={"User-Agent": BROWSER_HEADERS["User-Agent"]},
+                timeout=18
             )
             if r.status_code == 200 and r.text.strip():
                 return r.text.strip()
@@ -68,8 +146,6 @@ class SmartCouncil:
 
 
 class ViralGrowthEngine:
-    """محرك التعلم الحي السريع من الإنترنت لرفع المشاهدات واللايكات والمتابعات"""
-
     @staticmethod
     def fetch_live_internet_trends():
         trends = []
@@ -79,7 +155,7 @@ class ViralGrowthEngine:
         ]
         for url in rss_urls:
             try:
-                r = requests.get(url, timeout=3, headers={"User-Agent": "Mozilla/5.0"})
+                r = requests.get(url, timeout=4, headers=BROWSER_HEADERS)
                 if r.status_code == 200:
                     root = ET.fromstring(r.text)
                     for item in root.findall(".//item/title"):
@@ -92,11 +168,11 @@ class ViralGrowthEngine:
 
         if not trends:
             trends = [
+                "طفل موهوب يسجل هدفاً مستحيلاً في الدقيقة الأخيرة",
+                "دخول عالم الكرتون في الواقع بأسلوب POV",
+                "مواقف كوميدية طريفة بأسلوب ديزني الكلاسيكي",
                 "أسرار الذكاء الاصطناعي الخفية",
-                "قصص غموض حقيقية لم تُحل",
-                "مهارات تضاعف دخلك من الهاتف",
-                "عجائب الكون والفضاء العميق",
-                "خدع نفسية في لغة الجسد"
+                "قصص غموض حقيقية لم تُحل"
             ]
         return trends[:6]
 
@@ -105,16 +181,16 @@ class ViralGrowthEngine:
         trends = cls.fetch_live_internet_trends()
         viral_rules_pool = [
             (
-                "البدء بلقطة قريبة صادمة في أول 3 ثوانٍ مع سؤال يفتح فجوة الفضول، وتبديل حركة الكاميرا كل 3 ثوانٍ لمضاعفة وقت المشاهدة.",
-                "Open with an extreme close-up hook in the first 3 seconds, high contrast pacing, and curiosity gap narration."
+                "تثبيت ملامح وملابس الشخصية الرئيسية (Character Sheet Lock) في جميع المشاهد مع خطاف بصري خاطف في أول 3 ثوانٍ.",
+                "Lock character appearance and outfit across all scenes, start with a 3-second action hook."
             ),
             (
-                "استخدام الإضاءة السينمائية المتباينة مع نبرة صوت حماسية متسارعة، وختم الفيديو بسؤال جدلي يشعل صندوق التعليقات.",
-                "Apply high-contrast dramatic lighting, energetic voice pacing, and end with a controversial question for comments."
+                "استخدام زاوية الكاميرا من منظور الشخص الأول (POV) أو تعابير الوجه الواضحة على غرار ديزني وبيكسار لرفع التفاعل.",
+                "Use immersive POV camera angles or expressive Disney/Pixar facial acting to maximize viewer retention."
             ),
             (
-                "ربط القصة بحدث رائج في أول جملة صوتية لمنع التمرير السريع (Scroll)، مع التركيز البصري على تعابير الوجه والعيون.",
-                "Anchor the opening line to a trending topic, focus on expressive eyes and dynamic zoom transitions."
+                "تغيير زاوية اللقطة في كل مشهد (لقطة واسعة للمكان، ثم متوسطة للحركة، ثم قريبة للوجه) مع سؤال تفاعلي في النهاية.",
+                "Alternate camera framing (Wide establishing, Medium action, Close-up emotion) and end with an engagement question."
             )
         ]
         chosen_ar, chosen_en = random.choice(viral_rules_pool)
@@ -129,11 +205,26 @@ class ViralGrowthEngine:
 
 class VideoProductionEngine:
     @staticmethod
+    def translate_topic_to_english(topic_ar):
+        # ترجمة فورية ومضمونة لموضوع المستخدم إلى الإنجليزية الدقيقة حتى يفهمه محرك الرسم البصري 100%
+        try:
+            url = "https://translate.googleapis.com/translate_a/single"
+            params = {"client": "gtx", "sl": "auto", "tl": "en", "dt": "t", "q": topic_ar}
+            r = requests.get(url, params=params, headers=BROWSER_HEADERS, timeout=8)
+            if r.status_code == 200:
+                data = r.json()
+                translated = "".join([part[0] for part in data[0] if part[0]])
+                if translated.strip():
+                    return translated.strip()
+        except Exception:
+            pass
+        return topic_ar
+
+    @staticmethod
     async def synthesize_arabic_voice(text_ar, voice_name, out_mp3_path, afilt="atempo=1.05"):
         raw_audio = f"{out_mp3_path}_raw.mp3"
         success = False
 
-        # 1. المحرك السريع المضمون: Google Arabic TTS
         try:
             def _run_gtts():
                 tts = gTTS(text=text_ar, lang="ar", slow=False)
@@ -144,7 +235,6 @@ class VideoProductionEngine:
         except Exception:
             success = False
 
-        # 2. المحرك البديل: Edge-TTS
         if not success:
             try:
                 comm = edge_tts.Communicate(text_ar, voice_name)
@@ -154,12 +244,11 @@ class VideoProductionEngine:
             except Exception:
                 success = False
 
-        # 3. المحرك الثالث المباشر
         if not success:
             try:
                 q = urllib.parse.quote(text_ar[:180])
                 url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ar&q={q}"
-                r = await asyncio.to_thread(requests.get, url, timeout=8)
+                r = await asyncio.to_thread(requests.get, url, headers=BROWSER_HEADERS, timeout=8)
                 if r.status_code == 200 and len(r.content) > 500:
                     with open(raw_audio, "wb") as f:
                         f.write(r.content)
@@ -179,7 +268,7 @@ class VideoProductionEngine:
             return True
 
         fallback_cmd = [
-            FFMPEG_BIN, "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=7",
+            FFMPEG_BIN, "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=8",
             "-af", "volume=0.08", "-c:a", "libmp3lame", out_mp3_path
         ]
         await asyncio.to_thread(subprocess.run, fallback_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -187,7 +276,6 @@ class VideoProductionEngine:
 
     @staticmethod
     def get_audio_duration(audio_path):
-        # قراءة مدة الصوت مباشرة عبر مكتبة mutagen أو تحليل مخرجات FFmpeg دون الحاجة لـ ffprobe
         if MP3 is not None:
             try:
                 audio = MP3(audio_path)
@@ -205,31 +293,40 @@ class VideoProductionEngine:
             m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", proc.stderr)
             if m:
                 h, mins, secs = int(m.group(1)), int(m.group(2)), float(m.group(3))
-                return max(4.5, h * 3600 + mins * 60 + secs)
+                return max(5.0, h * 3600 + mins * 60 + secs)
         except Exception:
             pass
-        return 8.0
+        return 9.0
 
-    @staticmethod
-    def build_script_and_scenes(topic_text, mode_info, learned_rules, num_scenes=3):
+    @classmethod
+    def build_script_and_scenes(cls, topic_text, mode_key, mode_info, learned_rules, num_scenes=4):
+        topic_en = cls.translate_topic_to_english(topic_text)
+        sig = MODE_VISUAL_SIGNATURES.get(mode_key, {})
+        style_prefix = sig.get("style_prefix") or mode_info.get("style", "Cinematic 4K")
+
         sys_role = (
-            "أنت مخرج فيديوهات فيروسية (Viral Director). أخرج JSON فقط يحتوي على:\n"
+            "You are a Master AI Film Director specializing in Character & Location Consistency (like Disney/Pixar & Kling workflows). "
+            "Given a user topic and visual style, design a cohesive multi-scene story where the EXACT SAME character description and setting appear in every scene.\n"
+            "Output ONLY valid JSON with these exact keys:\n"
             "{\n"
-            '  "title_ar": "عنوان فيروسي خاطف",\n'
-            '  "voiceover_ar": "نص التعليق الصوتي بالعربية الفصحى يبدأ بخطاف صادم وينتهي بدعوة للايك والمتابعة (25 إلى 38 كلمة بدون أقواس)",\n'
-            '  "hashtags": "#اكسبلور #تريند #فيديو_فيروسي #shorts #reels",\n'
-            '  "pinned_comment": "سؤال تفاعلي ذكي لجمع التعليقات",\n'
+            '  "title_ar": "عنوان فيروسي جذاب بالعربية يحكي القصة",\n'
+            '  "voiceover_ar": "سرد قصصي مشوق ومترابط بالعربية الفصحى يصف أحداث القصة من البداية للنهاية (32 إلى 45 كلمة بدون رموز)",\n'
+            '  "character_sheet_en": "Exact visual description of the main character (age, hair, outfit, colors) and setting to keep identical in all scenes",\n'
+            '  "hashtags": "#اكسبلور #تريند #قصص #shorts #viral",\n'
+            '  "pinned_comment": "سؤال تفاعلي للمشاهدين حول القصة",\n'
             '  "scenes": [\n'
-            '    "Scene 1 English visual prompt",\n'
-            '    "Scene 2 English visual prompt",\n'
-            '    "Scene 3 English visual prompt"\n'
+            '    "Scene 1 English prompt: [character_sheet_en] + wide establishing action shot",\n'
+            '    "Scene 2 English prompt: [character_sheet_en] + dynamic medium action shot",\n'
+            '    "Scene 3 English prompt: [character_sheet_en] + intense close-up emotional/skill shot",\n'
+            '    "Scene 4 English prompt: [character_sheet_en] + epic triumphant finale shot"\n'
             '  ]\n'
             "}"
         )
         user_task = (
-            f"موضوع الفيديو: {topic_text}\n"
-            f"النمط البصري ({mode_info.get('name', '')}): {mode_info.get('style', '')}\n"
-            f"القواعد الفيروسية: {learned_rules}"
+            f"User Topic (Arabic): {topic_text}\n"
+            f"User Topic (English): {topic_en}\n"
+            f"Mandatory Visual Style ({mode_info.get('name', '')}): {style_prefix}\n"
+            f"Viral Rules: {learned_rules}"
         )
         raw = SmartCouncil.ask(sys_role, user_task, json_output=True)
         try:
@@ -237,43 +334,112 @@ class VideoProductionEngine:
             s_i, e_i = clean.find("{"), clean.rfind("}")
             if s_i != -1 and e_i != -1:
                 data = json.loads(clean[s_i:e_i + 1])
-                if data.get("voiceover_ar") and data.get("scenes"):
-                    data["scenes"] = data["scenes"][:num_scenes]
+                if data.get("voiceover_ar") and data.get("scenes") and len(data["scenes"]) >= 2:
+                    # دمج بصمة الوضع وثبات الشخصية في كل مشهد لضمان الترابط البصري التام
+                    char_lock = data.get("character_sheet_en", topic_en)
+                    locked_scenes = []
+                    for s in data["scenes"][:num_scenes]:
+                        locked_scenes.append(f"{style_prefix}. {char_lock}. {s}, masterpiece, consistent character")
+                    data["scenes"] = locked_scenes
                     data.setdefault("hashtags", "#اكسبلور #تريند #فيديو_فيروسي #shorts #reels")
-                    data.setdefault("pinned_comment", "ما رأيك في هذا المشهد؟ اكتب تعليقك واضغط لايك ومتابعة للجزء القادم! 🔥")
+                    data.setdefault("pinned_comment", "ما رأيك في هذه القصة؟ اكتب تقييمك في التعليقات واضغط لايك ومتابعة! 🔥")
                     return data
         except Exception:
             pass
 
-        style_str = mode_info.get("style", "Cinematic 4K")
+        # بناء سرد مترابط ومشاهد متسلسلة لنفس الشخصية في حال عدم استجابة نموذج النص الخارجي
+        char_anchor = f"Consistent main subject: {topic_en}, identical appearance and outfit in every frame"
         scenes = [
-            f"Eye-catching viral hook shot of {topic_text}, {style_str}, extreme detail, dramatic lighting, 8k",
-            f"Dynamic action mid-shot of {topic_text}, {style_str}, intense atmosphere, perfect anatomy",
-            f"Unforgettable climax shot of {topic_text}, {style_str}, vibrant contrast, masterpiece"
+            f"{style_prefix}, {char_anchor}, Scene 1 wide establishing shot introducing {topic_en} in a vibrant detailed environment, 8k masterpiece",
+            f"{style_prefix}, {char_anchor}, Scene 2 dynamic medium action shot of {topic_en} in full motion with expressive energy, cinematic framing",
+            f"{style_prefix}, {char_anchor}, Scene 3 dramatic close-up shot focusing on facial expression and intense skill of {topic_en}, sharp focus",
+            f"{style_prefix}, {char_anchor}, Scene 4 epic finale celebration shot of {topic_en} achieving victory under dramatic lighting"
         ]
         return {
-            "title_ar": f"مشهد مذهل: {topic_text[:30]} 🔥",
+            "title_ar": f"قصة مذهلة: {topic_text[:32]} 🔥",
             "voiceover_ar": (
-                f"شاهد كيف يتجسد {topic_text} بأعلى دقة بصرية وسينمائية. "
-                "إذا أعجبتك هذه اللقطات الخاطفة، اضغط لايك وتابع الحساب الآن ليصلك كل جديد!"
+                f"تبدأ الحكاية في مشهد يخطف الأنفاس حول {topic_text}، "
+                "حيث تتوالى الأحداث بحماس متصاعد وإصرار لا يتوقف حتى لحظة الحسم المذهلة في النهاية. "
+                "اضغط لايك وتابعنا للمزيد من القصص!"
             ),
-            "hashtags": "#اكسبلور #تريند #لايك #متابعة #shorts #viral",
-            "pinned_comment": f"ما أكثر لقطة أعجبتك في فيديو {topic_text[:20]}؟ شاركنا في التعليقات! 👇🔥",
+            "hashtags": "#اكسبلور #تريند #قصص #لايك #متابعة #shorts",
+            "pinned_comment": f"تقييمك للقصة من 10؟ اكتب رأيك في التعليقات حول {topic_text[:20]}! 👇🔥",
             "scenes": scenes[:num_scenes]
         }
 
     @staticmethod
-    def fetch_scene_image(prompt_en, out_path, width=576, height=1024, scene_idx=0):
-        seed = random.randint(100, 999999)
-        encoded = urllib.parse.quote(prompt_en[:180])
-        urls = [
-            f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width={width}&height={height}&seed={seed}&nologo=true&model=flux",
-            f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width={width}&height={height}&seed={seed}&nologo=true"
+    def fetch_scene_image(prompt_en, out_path, width=576, height=1024, consistent_seed=42, scene_idx=0):
+        clean_prompt = re.sub(r"[^\w\s,.-]", " ", prompt_en)
+        clean_prompt = " ".join(clean_prompt.split())[:240]
+        encoded = urllib.parse.quote(clean_prompt)
+        seed_val = consistent_seed + scene_idx
+
+        # 1. المحرك الأول: Pollinations Flux مع ترويسة متصفح كاملة لتفادي حظر Cloudflare
+        primary_urls = [
+            f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width={width}&height={height}&seed={seed_val}&nologo=true&model=flux",
+            f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width={width}&height={height}&seed={seed_val}&nologo=true&model=turbo",
+            f"[https://pollinations.ai/p/](https://pollinations.ai/p/){encoded}?width={width}&height={height}&seed={seed_val}&nologo=true"
         ]
-        for url in urls:
+        for url in primary_urls:
             try:
-                r = requests.get(url, timeout=10)
-                if r.status_code == 200 and len(r.content) > 3000:
+                r = requests.get(url, headers=BROWSER_HEADERS, timeout=22)
+                if r.status_code == 200 and len(r.content) > 5000:
+                    with open(out_path, "wb") as f:
+                        f.write(r.content)
+                    img = Image.open(out_path).convert("RGB").resize((width, height))
+                    img.save(out_path, "JPEG", quality=93)
+                    return True
+            except Exception:
+                time.sleep(0.8)
+
+        # 2. المحرك الثاني البديل: Hercai Free AI Image Generator
+        try:
+            hercai_url = f"[https://hercai.onrender.com/v3/text2image?prompt=](https://hercai.onrender.com/v3/text2image?prompt=){encoded}"
+            r = requests.get(hercai_url, headers=BROWSER_HEADERS, timeout=20)
+            if r.status_code == 200:
+                img_url = r.json().get("url")
+                if img_url:
+                    img_r = requests.get(img_url, headers=BROWSER_HEADERS, timeout=20)
+                    if img_r.status_code == 200 and len(img_r.content) > 5000:
+                        with open(out_path, "wb") as f:
+                            f.write(img_r.content)
+                        img = Image.open(out_path).convert("RGB").resize((width, height))
+                        img.save(out_path, "JPEG", quality=93)
+                        return True
+        except Exception:
+            pass
+
+        # 3. المحرك الثالث البديل: HuggingFace Inference API (إذا توفر مفتاح HF_TOKEN)
+        hf_token = Config.HF_TOKEN or db.get_api_key("HF_TOKEN")
+        if hf_token:
+            try:
+                hf_api = "[https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell](https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell)"
+                r = requests.post(
+                    hf_api,
+                    headers={"Authorization": f"Bearer {hf_token}"},
+                    json={"inputs": clean_prompt},
+                    timeout=20
+                )
+                if r.status_code == 200 and len(r.content) > 5000:
+                    with open(out_path, "wb") as f:
+                        f.write(r.content)
+                    img = Image.open(out_path).convert("RGB").resize((width, height))
+                    img.save(out_path, "JPEG", quality=93)
+                    return True
+            except Exception:
+                pass
+
+        # 4. المحرك الرابع: جلب صورة فوتوغرافية حقيقية عالية الدقة مرتبطة بالموضوع (وليس دوائر ملونة أبداً)
+        keywords = [w for w in clean_prompt.split() if len(w) > 3 and w.lower() not in {"scene", "shot", "style", "consistent", "frame", "masterpiece"}][:3]
+        kw_str = ",".join(keywords) if keywords else "cinema"
+        real_photo_urls = [
+            f"[https://loremflickr.com/](https://loremflickr.com/){width}/{height}/{urllib.parse.quote(kw_str)}?lock={seed_val}",
+            f"[https://picsum.photos/seed/](https://picsum.photos/seed/){seed_val}/{width}/{height}"
+        ]
+        for p_url in real_photo_urls:
+            try:
+                r = requests.get(p_url, headers=BROWSER_HEADERS, timeout=15)
+                if r.status_code == 200 and len(r.content) > 4000:
                     with open(out_path, "wb") as f:
                         f.write(r.content)
                     img = Image.open(out_path).convert("RGB").resize((width, height))
@@ -282,54 +448,24 @@ class VideoProductionEngine:
             except Exception:
                 pass
 
-        # توليد مشهد بصري فني غني بالإضاءة والألوان الخاصة بالوضع في حال بطء السيرفر الخارجي
-        palettes = [
-            ((15, 25, 55), (210, 95, 45), (255, 210, 110)),
-            ((10, 35, 45), (30, 160, 140), (190, 250, 220)),
-            ((35, 12, 45), (175, 40, 95), (250, 160, 210))
-        ]
-        bg_top, bg_bot, glow_col = palettes[scene_idx % len(palettes)]
-        img = Image.new("RGB", (width, height))
-        draw = ImageDraw.Draw(img)
-
-        for y in range(height):
-            ratio = y / float(height)
-            r_c = int(bg_top[0] * (1 - ratio) + bg_bot[0] * ratio)
-            g_c = int(bg_top[1] * (1 - ratio) + bg_bot[1] * ratio)
-            b_c = int(bg_top[2] * (1 - ratio) + bg_bot[2] * ratio)
-            draw.line([(0, y), (width, y)], fill=(r_c, g_c, b_c))
-
-        # إضافة دوائر إضاءة سينمائية (Bokeh & Cinematic Glow)
-        cx, cy = width // 2, int(height * (0.38 + 0.08 * (scene_idx % 2)))
-        for rad in range(240, 20, -15):
-            intensity = 1.0 - (rad / 240.0)
-            col = (
-                min(255, int(bg_bot[0] + glow_col[0] * intensity * 0.65)),
-                min(255, int(bg_bot[1] + glow_col[1] * intensity * 0.65)),
-                min(255, int(bg_bot[2] + glow_col[2] * intensity * 0.65))
-            )
-            draw.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=col)
-
-        img = img.filter(ImageFilter.GaussianBlur(radius=4))
-        img.save(out_path, "JPEG", quality=92)
-        return True
+        return False
 
     @classmethod
-    async def render_full_video(cls, topic_text, mode_key, mode_info, progress_callback=None, num_scenes=3):
+    async def render_full_video(cls, topic_text, mode_key, mode_info, progress_callback=None, num_scenes=4):
         job_id = f"vid_{mode_key}_{int(time.time())}_{random.randint(10, 99)}"
         work_dir = f"/tmp/{job_id}"
         os.makedirs(work_dir, exist_ok=True)
 
         learned = db.get_relevant_lessons()
         if progress_callback:
-            await progress_callback("📝 **الخطوة 1/4:** جاري هندسة الخطاف الفيروسي وكتابة السيناريو العربي...")
+            await progress_callback("📝 **الخطوة 1/4:** جاري تصميم بطاقة ثبات الشخصية (Character Sheet) وكتابة القصة المترابطة...")
 
-        script_data = await asyncio.to_thread(cls.build_script_and_scenes, topic_text, mode_info, learned, num_scenes)
+        script_data = await asyncio.to_thread(cls.build_script_and_scenes, topic_text, mode_key, mode_info, learned, num_scenes)
         voice_text = script_data["voiceover_ar"]
         scenes = script_data["scenes"][:num_scenes]
 
         if progress_callback:
-            await progress_callback("🎙️ **الخطوة 2/4:** جاري تسجيل التعليق الصوتي العربي الجاذب للمشاهدات...")
+            await progress_callback("🎙️ **الخطوة 2/4:** جاري تسجيل التعليق الصوتي العربي للقصة...")
 
         audio_path = os.path.join(work_dir, "voice.mp3")
         voice_name = mode_info.get("voice", "ar-SA-HamedNeural")
@@ -337,30 +473,39 @@ class VideoProductionEngine:
         await cls.synthesize_arabic_voice(voice_text, voice_name, audio_path, afilt)
 
         total_duration = await asyncio.to_thread(cls.get_audio_duration, audio_path)
-        scene_dur = max(3.0, round((total_duration + 0.4) / len(scenes), 2))
+        scene_dur = max(3.0, round((total_duration + 0.5) / len(scenes), 2))
         frames_per_scene = int(scene_dur * 24)
 
         if progress_callback:
-            await progress_callback("🎨 **الخطوة 3/4:** جاري رسم وتوليد المشاهد البصرية بنفس ستايل الوضع...")
+            await progress_callback(f"🎨 **الخطوة 3/4:** جاري توليد {len(scenes)} مشاهد مترابطة بستايل ({mode_info.get('name', '')})...")
 
-        img_paths = [os.path.join(work_dir, f"scene_{i}.jpg") for i in range(len(scenes))]
-        await asyncio.gather(*[
-            asyncio.to_thread(cls.fetch_scene_image, scenes[i], img_paths[i], 576, 1024, i)
-            for i in range(len(scenes))
-        ])
+        # تثبيت بذرة الشخصية (Consistent Seed) وتوليد المشاهد بالتتابع لمنع حظر السيرفر وضمان ظهور الصور الحقيقية
+        consistent_seed = random.randint(10000, 899999)
+        img_paths = []
+        for i, scene_prompt in enumerate(scenes):
+            img_p = os.path.join(work_dir, f"scene_{i}.jpg")
+            await asyncio.to_thread(cls.fetch_scene_image, scene_prompt, img_p, 576, 1024, consistent_seed, i)
+            if os.path.exists(img_p):
+                img_paths.append(img_p)
+            await asyncio.sleep(0.6)
 
         if progress_callback:
-            await progress_callback("🎬 **الخطوة 4/4:** جاري المونتاج الفيروسي ودمج الصوت وإخراج ملف (`.mp4`)...")
+            await progress_callback("🎬 **الخطوة 4/4:** جاري تحريك الكاميرا ودمج المشاهد والصوت في ملف (`.mp4`)...")
 
         scene_videos = []
         vfilter = mode_info.get("vfilter", "eq=contrast=1.15:saturation=1.15")
 
+        # حركات كاميرا سينمائية متنوعة لكل لقطة (تقريب، تبعيد، تحريك أفقي)
+        camera_moves = [
+            f"zoompan=z='min(zoom+0.0022,1.24)':d={frames_per_scene}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=576x1024:fps=24",
+            f"zoompan=z='1.18':d={frames_per_scene}:x='(iw-iw/zoom)*(on/{frames_per_scene})':y='ih/2-(ih/zoom/2)':s=576x1024:fps=24",
+            f"zoompan=z='if(lte(zoom,1.0),1.24,max(1.001,zoom-0.0022))':d={frames_per_scene}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=576x1024:fps=24",
+            f"zoompan=z='min(zoom+0.0025,1.28)':d={frames_per_scene}:x='iw/2-(iw/zoom/2)':y='(ih-ih/zoom)*(on/{frames_per_scene})':s=576x1024:fps=24"
+        ]
+
         for idx, img_path in enumerate(img_paths):
             seg_path = os.path.join(work_dir, f"seg_{idx}.mp4")
-            if idx % 2 == 0:
-                zp = f"zoompan=z='min(zoom+0.0024,1.25)':d={frames_per_scene}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=576x1024:fps=24"
-            else:
-                zp = f"zoompan=z='if(lte(zoom,1.0),1.25,max(1.001,zoom-0.0024))':d={frames_per_scene}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=576x1024:fps=24"
+            zp = camera_moves[idx % len(camera_moves)]
 
             ff_cmd = [
                 FFMPEG_BIN, "-y", "-loop", "1", "-i", img_path,
@@ -394,21 +539,23 @@ class VideoProductionEngine:
         if mode_key in PREWARMED_VIDEOS and os.path.exists(PREWARMED_VIDEOS[mode_key]):
             return PREWARMED_VIDEOS[mode_key]
 
-        sample_topic = mode_info.get("sample_topic") or f"نموذج تطبيقي لوضع {mode_info.get('name', '')}"
-        mp4_path, _ = await cls.render_full_video(sample_topic, mode_key, mode_info, progress_callback=None, num_scenes=2)
+        # كل وضع له موضوع وبصمة بصرية خاصة به تماماً ليختلف فيديو المثال من وضع لآخر
+        sig = MODE_VISUAL_SIGNATURES.get(mode_key, {})
+        sample_topic = sig.get("sample_subject") or mode_info.get("sample_topic") or f"Cinematic showcase of {mode_info.get('name', '')}"
+        mp4_path, _ = await cls.render_full_video(sample_topic, mode_key, mode_info, progress_callback=None, num_scenes=3)
         if os.path.exists(mp4_path):
             PREWARMED_VIDEOS[mode_key] = mp4_path
         return mp4_path
 
     @classmethod
     async def prewarm_all_modes_background(cls):
-        await asyncio.sleep(4)
+        await asyncio.sleep(6)
         modes = db.get_all_modes()
         for m_key, m_info in modes.items():
             if not m_info.get("sample_file_id") and m_key not in PREWARMED_VIDEOS:
                 try:
                     await cls.get_or_build_mode_sample(m_key, m_info)
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(4)
                 except Exception:
                     pass
 
@@ -429,7 +576,6 @@ class SentinelEvolutionEngine:
         self.api_base = f"[https://api.github.com/repos/](https://api.github.com/repos/){Config.GITHUB_REPO}"
 
     def _get_valid_gh_headers(self):
-        # استخدام GITHUB_TOKEN المدمج في GitHub Actions أولاً لتجنب خطأ 401 نهائياً
         token = os.getenv("GITHUB_TOKEN", "").strip() or Config.GITHUB_TOKEN
         return {
             "Authorization": f"Bearer {token}",
@@ -446,9 +592,9 @@ class SentinelEvolutionEngine:
 
         if not ascii_words or any(t in clean_text for t in auto_discover_triggers):
             try:
-                # البحث في نماذج الفيديو والصوت المتصدرة تحديداً
                 hf_r = requests.get(
                     "[https://huggingface.co/api/models?pipeline_tag=text-to-video&sort=trendingScore&direction=-1&limit=6](https://huggingface.co/api/models?pipeline_tag=text-to-video&sort=trendingScore&direction=-1&limit=6)",
+                    headers=BROWSER_HEADERS,
                     timeout=8
                 )
                 if hf_r.status_code == 200:
@@ -459,7 +605,11 @@ class SentinelEvolutionEngine:
         else:
             keywords = " ".join(ascii_words)
             try:
-                hf_r = requests.get(f"[https://huggingface.co/api/models?search=](https://huggingface.co/api/models?search=){urllib.parse.quote(keywords)}&limit=4", timeout=8)
+                hf_r = requests.get(
+                    f"[https://huggingface.co/api/models?search=](https://huggingface.co/api/models?search=){urllib.parse.quote(keywords)}&limit=4",
+                    headers=BROWSER_HEADERS,
+                    timeout=8
+                )
                 if hf_r.status_code == 200:
                     hf_results = [m.get("id") for m in hf_r.json() if m.get("id")]
             except Exception:
@@ -469,6 +619,7 @@ class SentinelEvolutionEngine:
             q_term = keywords.split("/")[-1]
             gh_r = requests.get(
                 f"[https://api.github.com/search/repositories?q=](https://api.github.com/search/repositories?q=){urllib.parse.quote(q_term)}&sort=stars&per_page=3",
+                headers=BROWSER_HEADERS,
                 timeout=8
             )
             if gh_r.status_code == 200:
@@ -494,7 +645,6 @@ class SentinelEvolutionEngine:
         }
 
     def test_in_sandbox_branch(self, upgrade_id, tool_name, code_snippet):
-        # حفظ الإضافة محلياً دائماً + الرفع على GitHub عند توفر الصلاحية (يمنع توقف التطوير بسبب كود 401)
         os.makedirs("plugins", exist_ok=True)
         local_plugin = f"plugins/plugin_{upgrade_id}.py"
         with open(local_plugin, "w", encoding="utf-8") as f:
@@ -565,6 +715,7 @@ class SentinelEvolutionEngine:
                 "reason": f"هذا النمط متطابق مع ({existing_mode.get('name', '')}) الموجود مسبقاً في نظامك."
             }
 
+        en_style = VideoProductionEngine.translate_topic_to_english(video_caption_or_desc)
         mode_id = f"custom_{int(time.time()) % 10000}"
         return {
             "is_duplicate": False,
@@ -572,7 +723,7 @@ class SentinelEvolutionEngine:
             "mode_id": mode_id,
             "arabic_name": video_caption_or_desc[:22],
             "desc": f"نمط مخصص: {video_caption_or_desc[:60]}",
-            "style_prompt": f"Distinctive visual style of {video_caption_or_desc}, high quality 4k"
+            "style_prompt": f"Masterpiece visual style of {en_style}, consistent character design, ultra-detailed 4k"
         }
 
     def trigger_self_respawn(self):
