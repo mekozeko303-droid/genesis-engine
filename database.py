@@ -22,13 +22,13 @@ class GenesisDatabase:
     def _init_local_cache(self):
         if not os.path.exists(self.local_file):
             initial_data = {
-                "schema_version": 8,
+                "schema_version": 12,
                 "modes": Config.DEFAULT_MODES,
                 "cloned_video_ids": {},
                 "api_keys": {},
                 "lessons": [
-                    {"context": "consistency", "rule": "Maintain exact character clothing, facial features, and environment across all scenes."},
-                    {"context": "anatomy", "rule": "Always enforce 'perfect anatomy, expressive eyes, natural motion'."}
+                    {"context": "higgsfield_style", "rule": "Use multi-shot storytelling: Wide establishing shot, Medium action shot, Close-up expressive shot, Epic climax shot."},
+                    {"context": "character_lock", "rule": "Lock character clothing, age, and facial features across every scene in the project."}
                 ],
                 "quota": {
                     "used_pct": 0.0,
@@ -41,28 +41,23 @@ class GenesisDatabase:
         else:
             data = self._load_local()
             stored_modes = data.get("modes", {})
-            # إذا كانت النسخة قديمة تحتوي على فيديوهات الدوائر الملونة، يتم تصفير sample_file_id لتوليد فيديوهات حقيقية
-            reset_samples = data.get("schema_version", 0) < 8
+            # مسح جميع فيديوهات الشاشة الزرقاء القديمة (أقل من الإصدار 12) نهائياً
+            reset_blue_videos = data.get("schema_version", 0) < 12
             clean_modes = {}
 
             for k, v in Config.DEFAULT_MODES.items():
-                old_sample = "" if reset_samples else stored_modes.get(k, {}).get("sample_file_id", "")
+                old_sample = "" if reset_blue_videos else stored_modes.get(k, {}).get("sample_file_id", "")
                 clean_modes[k] = {**v, "sample_file_id": old_sample}
 
             for k, v in stored_modes.items():
                 if k not in Config.DEFAULT_MODES:
-                    is_dup, _ = self._check_against_dict(
-                        clean_modes,
-                        k,
-                        v.get("name", ""),
-                        v.get("style", "")
-                    )
+                    is_dup, _ = self._check_against_dict(clean_modes, k, v.get("name", ""), v.get("style", ""))
                     if not is_dup:
-                        if reset_samples:
+                        if reset_blue_videos:
                             v["sample_file_id"] = ""
                         clean_modes[k] = v
 
-            data["schema_version"] = 8
+            data["schema_version"] = 12
             data["modes"] = clean_modes
             data.setdefault("cloned_video_ids", {})
             data.setdefault("pending_upgrades", {})
@@ -75,7 +70,7 @@ class GenesisDatabase:
                 return json.load(f)
         except Exception:
             fallback = {
-                "schema_version": 8,
+                "schema_version": 12,
                 "modes": Config.DEFAULT_MODES,
                 "cloned_video_ids": {},
                 "api_keys": {},
@@ -146,7 +141,7 @@ class GenesisDatabase:
             "cost_pct": cost_pct,
             "est_time": "45 إلى 65 ثانية",
             "voice": "ar-SA-HamedNeural",
-            "afilt": "equalizer=f=100:width_type=h:width=100:g=4",
+            "afilt": "atempo=1.05",
             "vfilter": "eq=contrast=1.18:saturation=1.22",
             "keywords": list(self._normalize_text(name)),
             "sample_topic": f"مشهد تطبيقي يستعرض نمط {name}",
