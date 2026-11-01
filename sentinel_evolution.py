@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import base64
@@ -6,6 +7,7 @@ import random
 import asyncio
 import subprocess
 import urllib.parse
+import xml.etree.ElementTree as ET
 import requests
 from PIL import Image, ImageDraw
 from gtts import gTTS
@@ -52,13 +54,84 @@ class SmartCouncil:
         return "{}" if json_output else ""
 
 
+class ViralGrowthEngine:
+    """محرك التعلم الحي من الإنترنت لرفع المشاهدات واللايكات والمتابعات"""
+
+    @staticmethod
+    def fetch_live_internet_trends():
+        trends = []
+        rss_urls = [
+            "https://trends.google.com/trending/rss?geo=SA",
+            "https://trends.google.com/trending/rss?geo=EG",
+            "https://trends.google.com/trending/rss?geo=US"
+        ]
+        for url in rss_urls:
+            try:
+                r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+                if r.status_code == 200:
+                    root = ET.fromstring(r.text)
+                    for item in root.findall(".//item/title"):
+                        if item.text and item.text not in trends:
+                            trends.append(item.text.strip())
+                        if len(trends) >= 8:
+                            break
+            except Exception:
+                pass
+
+        if not trends:
+            trends = [
+                "أسرار الذكاء الاصطناعي الخفية",
+                "قصص غموض حقيقية لم تُحل",
+                "مهارات تضاعف دخلك من الهاتف",
+                "عجائب الكون والفضاء العميق",
+                "خدع نفسية في لغة الجسد"
+            ]
+        return trends[:8]
+
+    @classmethod
+    def learn_new_viral_rule_from_web(cls):
+        trends = cls.fetch_live_internet_trends()
+        prompt = (
+            f"التريندات الأكثر بحثاً على الإنترنت الآن هي: {trends}.\n"
+            "استنتج قاعدة ذهبية واحدة جديدة ومبتكرة لصناعة الفيديوهات القصيرة الفيروسية (Shorts/Reels/TikTok) "
+            "لزيادة المشاهدات واللايكات والمتابعات (تشمل الخطاف في أول 3 ثوانٍ، وحركة الكاميرا، وتحفيز التعليقات).\n"
+            "أخرج JSON فقط:\n"
+            "{\n"
+            '  "rule_ar": "شرح القاعدة الفيروسية بالعربية للمستخدم",\n'
+            '  "rule_en": "Concise English directive to inject into AI director prompt for maximum retention",\n'
+            '  "suggested_viral_topic": "فكرة فيديو فيروسية جاهزة مستوحاة من تريند اليوم"\n'
+            "}"
+        )
+        raw = SmartCouncil.ask("أنت خبير خوارزميات الانتشار الفيروسي في تيك توك ويوتيوب شورتس.", prompt, json_output=True)
+        try:
+            clean = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            s_i, e_i = clean.find("{"), clean.rfind("}")
+            parsed = json.loads(clean[s_i:e_i + 1])
+            rule_en = parsed.get("rule_en") or "Start with a shocking 3-second visual hook and high-contrast pacing."
+            db.save_lesson("viral_algorithm", rule_en)
+            return {
+                "trends": trends,
+                "rule_ar": parsed.get("rule_ar", "البدء بسؤال صادم في أول 3 ثوانٍ مع تغيير المشهد كل 3 ثوانٍ لكسر الملل البصري."),
+                "rule_en": rule_en,
+                "suggested_viral_topic": parsed.get("suggested_viral_topic", trends[0])
+            }
+        except Exception:
+            fallback_rule = "Open with an extreme close-up hook in the first 3 seconds, use high saturation contrast, and end with a question Loop."
+            db.save_lesson("viral_algorithm", fallback_rule)
+            return {
+                "trends": trends,
+                "rule_ar": "البدء بلقطة قريبة خاطفة وسؤال يثير الفضول في أول 3 ثوانٍ، وإنهاء الفيديو بسؤال مفتوح يشعل التعليقات.",
+                "rule_en": fallback_rule,
+                "suggested_viral_topic": trends[0]
+            }
+
+
 class VideoProductionEngine:
     @staticmethod
     async def synthesize_arabic_voice(text_ar, voice_name, out_mp3_path, afilt="atempo=1.05"):
         raw_audio = f"{out_mp3_path}_raw.mp3"
         success = False
 
-        # المحرك الأول: Edge-TTS (إذا لم يحظره سيرفر GitHub)
         try:
             comm = edge_tts.Communicate(text_ar, voice_name)
             await asyncio.wait_for(comm.save(raw_audio), timeout=10)
@@ -67,7 +140,6 @@ class VideoProductionEngine:
         except Exception:
             success = False
 
-        # المحرك الثاني المضمون 100% ضد خطأ 403: Google Arabic Neural TTS + FFmpeg Mastering
         if not success:
             try:
                 def _run_gtts():
@@ -79,11 +151,10 @@ class VideoProductionEngine:
             except Exception:
                 success = False
 
-        # المحرك الثالث: نقطة اتصال Google Translate الصوتية المباشرة
         if not success:
             try:
                 q = urllib.parse.quote(text_ar[:180])
-                url = f"https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ar&q={q}"
+                url = f"[https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ar&q=](https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ar&q=){q}"
                 r = await asyncio.to_thread(requests.get, url, timeout=12)
                 if r.status_code == 200 and len(r.content) > 500:
                     with open(raw_audio, "wb") as f:
@@ -93,7 +164,6 @@ class VideoProductionEngine:
                 success = False
 
         if success:
-            # تطبيق الهندسة الصوتية الخاصة بكل وضع
             cmd = [
                 "ffmpeg", "-y", "-i", raw_audio,
                 "-af", afilt, "-ar", "44100", "-ac", "2", "-b:a", "128k", out_mp3_path
@@ -104,7 +174,6 @@ class VideoProductionEngine:
             os.replace(raw_audio, out_mp3_path)
             return True
 
-        # محرك طوارئ يولد خلفية صوتية سينمائية حتى لا يفشل الريندر أبداً
         fallback_cmd = [
             "ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=8",
             "-af", "volume=0.08", "-c:a", "libmp3lame", out_mp3_path
@@ -115,21 +184,23 @@ class VideoProductionEngine:
     @staticmethod
     def build_script_and_scenes(topic_text, mode_info, learned_rules, num_scenes=3):
         sys_role = (
-            "أنت مخرج سينمائي وكاتب سيناريو عربي محترف. أخرج JSON فقط يحتوي على:\n"
+            "أنت مخرج فيديوهات فيروسية (Viral Director) خبير في خوارزميات تيك توك وريلز ويوتيوب شورتس. أخرج JSON فقط يحتوي على:\n"
             "{\n"
-            '  "title_ar": "عنوان جذاب للفيديو بالعربية",\n'
-            '  "voiceover_ar": "نص التعليق الصوتي بالعربية الفصحى المشوقة (من 25 إلى 40 كلمة، بدون رموز أو أقواس)",\n'
+            '  "title_ar": "عنوان فيروسي خاطف يجبر المشاهد على النقر",\n'
+            '  "voiceover_ar": "نص التعليق الصوتي بالعربية الفصحى يبدأ بخطاف صادم في أول 3 ثوانٍ وينتهي بدعوة ذكية للمتابعة واللايك (30 إلى 42 كلمة بدون أقواس)",\n'
+            '  "hashtags": "#هاشتاج1 #هاشتاج2 #هاشتاج3 #تريند #اكسبلور",\n'
+            '  "pinned_comment": "سؤال تفاعلي ذكي يوضَع في أول تعليق لجمع مئات التعليقات",\n'
             '  "scenes": [\n'
-            '    "Detailed English visual prompt for scene 1 matching the topic and style",\n'
-            '    "Detailed English visual prompt for scene 2 matching the topic and style",\n'
-            '    "Detailed English visual prompt for scene 3 matching the topic and style"\n'
+            '    "Scene 1 (3-Second Viral Hook): Extreme eye-catching visual prompt in English",\n'
+            '    "Scene 2 (Core Story Action): Detailed English visual prompt",\n'
+            '    "Scene 3 (Climax & Loop): Detailed English visual prompt"\n'
             '  ]\n'
             "}"
         )
         user_task = (
             f"موضوع الفيديو المطلوب: {topic_text}\n"
             f"النمط البصري المطلوب ({mode_info.get('name', '')}): {mode_info.get('style', '')}\n"
-            f"قواعد الجودة: {learned_rules}"
+            f"قواعد خوارزميات الانتشار المتعلمة من الإنترنت: {learned_rules}"
         )
         raw = SmartCouncil.ask(sys_role, user_task, json_output=True)
         try:
@@ -140,22 +211,26 @@ class VideoProductionEngine:
                 data = json.loads(clean[s_i:e_i + 1])
                 if data.get("voiceover_ar") and data.get("scenes"):
                     data["scenes"] = data["scenes"][:num_scenes]
+                    data.setdefault("hashtags", "#اكسبلور #تريند #فيديو_فيروسي #shorts #reels")
+                    data.setdefault("pinned_comment", "ما رأيك في هذه الحقيقة؟ اكتب توقعك في التعليقات واضغط لايك ومتابعة للجزء القادم! 🔥")
                     return data
         except Exception:
             pass
 
         style_str = mode_info.get("style", "Cinematic 4K")
         scenes = [
-            f"Wide cinematic establishing shot of {topic_text}, {style_str}, ultra detailed, 8k, masterpiece",
-            f"Dynamic medium action shot of {topic_text}, {style_str}, expressive lighting, perfect anatomy",
-            f"Dramatic close-up climax shot of {topic_text}, {style_str}, vivid colors, emotional atmosphere"
+            f"Eye-catching viral hook shot of {topic_text}, {style_str}, extreme detail, dramatic lighting, 8k",
+            f"Dynamic action mid-shot of {topic_text}, {style_str}, intense atmosphere, perfect anatomy",
+            f"Unforgettable climax shot of {topic_text}, {style_str}, vibrant contrast, masterpiece"
         ]
         return {
-            "title_ar": f"{mode_info.get('name', '')} - {topic_text[:30]}",
+            "title_ar": f"السر الذي لا يعرفه 99% من الناس عن {topic_text[:28]}! 🔥",
             "voiceover_ar": (
-                f"مشهد استثنائي يأخذنا في قلب الحدث حول {topic_text}. "
-                "حيث تتجسد التفاصيل البصرية المذهلة وتنبض اللقطات بالحياة والواقعية الفائقة."
+                f"هل تساءلت يوماً عن السر الحقيقي وراء {topic_text}؟ "
+                "في هذه اللقطات نكشف لك ما لم تشاهده من قبل، اضغط لايك وتابع الحساب الآن لأن القادم سيذهلك تماماً!"
             ),
+            "hashtags": "#اكسبلور #تريند #لايك #متابعة #shorts #viral",
+            "pinned_comment": f"هل كنت تعرف هذا عن {topic_text[:20]}؟ شاركنا رأيك في التعليقات ولا تنسَ اللايك والمتابعة! 👇🔥",
             "scenes": scenes[:num_scenes]
         }
 
@@ -164,8 +239,8 @@ class VideoProductionEngine:
         seed = random.randint(100, 999999)
         encoded = urllib.parse.quote(prompt_en[:200])
         urls = [
-            f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width={width}&height={height}&seed={seed}&nologo=true&model=flux",
-            f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded}?width={width}&height={height}&seed={seed}&nologo=true"
+            f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&seed={seed}&nologo=true&model=flux",
+            f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&seed={seed}&nologo=true"
         ]
         for url in urls:
             try:
@@ -209,14 +284,14 @@ class VideoProductionEngine:
 
         learned = db.get_relevant_lessons()
         if progress_callback:
-            await progress_callback("📝 **الخطوة 1/4:** جاري كتابة السيناريو العربي وتصميم المشاهد البصرية...")
+            await progress_callback("📝 **الخطوة 1/4:** جاري هندسة الخطاف الفيروسي (أول 3 ثوانٍ) وكتابة السيناريو...")
 
         script_data = await asyncio.to_thread(cls.build_script_and_scenes, topic_text, mode_info, learned, num_scenes)
         voice_text = script_data["voiceover_ar"]
         scenes = script_data["scenes"][:num_scenes]
 
         if progress_callback:
-            await progress_callback("🎙️ **الخطوة 2/4:** جاري تسجيل التعليق الصوتي العربي (بمحرك محصن ضد الحظر)...")
+            await progress_callback("🎙️ **الخطوة 2/4:** جاري تسجيل التعليق الصوتي العربي الجاذب للمشاهدات...")
 
         audio_path = os.path.join(work_dir, "voice.mp3")
         voice_name = mode_info.get("voice", "ar-SA-HamedNeural")
@@ -230,7 +305,6 @@ class VideoProductionEngine:
         if progress_callback:
             await progress_callback("🎨 **الخطوة 3/4:** جاري رسم وتوليد المشاهد البصرية بنفس ستايل الوضع...")
 
-        # تحميل جميع مشاهد الفيديو بالتوازي لتسريع الريندر للضعف
         img_paths = [os.path.join(work_dir, f"scene_{i}.jpg") for i in range(len(scenes))]
         await asyncio.gather(*[
             asyncio.to_thread(cls.fetch_scene_image, scenes[i], img_paths[i], 576, 1024)
@@ -238,7 +312,7 @@ class VideoProductionEngine:
         ])
 
         if progress_callback:
-            await progress_callback("🎬 **الخطوة 4/4:** جاري تحريك المشاهد ودمج الصوت العربي وإخراج ملف (`.mp4`)...")
+            await progress_callback("🎬 **الخطوة 4/4:** جاري المونتاج الفيروسي ودمج الصوت وإخراج ملف (`.mp4`)...")
 
         scene_videos = []
         vfilter = mode_info.get("vfilter", "eq=contrast=1.15:saturation=1.15")
@@ -275,7 +349,6 @@ class VideoProductionEngine:
 
     @classmethod
     async def get_or_build_mode_sample(cls, mode_key, mode_info):
-        # إذا كان الفيديو مجهزاً مسبقاً على السيرفر، أرسله في نفس اللحظة!
         if mode_key in PREWARMED_VIDEOS and os.path.exists(PREWARMED_VIDEOS[mode_key]):
             return PREWARMED_VIDEOS[mode_key]
 
@@ -287,8 +360,7 @@ class VideoProductionEngine:
 
     @classmethod
     async def prewarm_all_modes_background(cls):
-        # تجهيز نماذج الفيديو لجميع الأوضاع تلقائياً في الخلفية فور إقلاع البوت لتكون جاهزة دائماً
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
         modes = db.get_all_modes()
         for m_key, m_info in modes.items():
             if not m_info.get("sample_file_id") and m_key not in PREWARMED_VIDEOS:
@@ -316,7 +388,7 @@ class SentinelEvolutionEngine:
             "Authorization": f"Bearer {Config.GITHUB_TOKEN}",
             "Accept": "application/vnd.github+json"
         }
-        self.api_base = f"[https://api.github.com/repos/](https://api.github.com/repos/){Config.GITHUB_REPO}"
+        self.api_base = f"https://api.github.com/repos/{Config.GITHUB_REPO}"
 
     def evaluate_user_news(self, user_news_text):
         clean_text = user_news_text.strip()
@@ -326,10 +398,9 @@ class SentinelEvolutionEngine:
         hf_results = []
         gh_results = []
 
-        # إذا كتب المستخدم "ابحث انت وقلي"، يجلب البوت أعلى النماذج الحقيقية الرائجة حالياً من HuggingFace مباشرة
         if not ascii_words or any(t in clean_text for t in auto_discover_triggers):
             try:
-                hf_r = requests.get("[https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=8](https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=8)", timeout=10)
+                hf_r = requests.get("https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=8", timeout=10)
                 if hf_r.status_code == 200:
                     hf_results = [m.get("id") for m in hf_r.json() if m.get("id")]
             except Exception:
@@ -338,7 +409,7 @@ class SentinelEvolutionEngine:
         else:
             keywords = " ".join(ascii_words)
             try:
-                hf_r = requests.get(f"[https://huggingface.co/api/models?search=](https://huggingface.co/api/models?search=){urllib.parse.quote(keywords)}&limit=4", timeout=10)
+                hf_r = requests.get(f"https://huggingface.co/api/models?search={urllib.parse.quote(keywords)}&limit=4", timeout=10)
                 if hf_r.status_code == 200:
                     hf_results = [m.get("id") for m in hf_r.json() if m.get("id")]
             except Exception:
@@ -346,7 +417,7 @@ class SentinelEvolutionEngine:
 
         try:
             q_term = keywords.split("/")[-1]
-            gh_r = requests.get(f"[https://api.github.com/search/repositories?q=](https://api.github.com/search/repositories?q=){urllib.parse.quote(q_term)}&sort=stars&per_page=3", headers=self.gh_headers, timeout=10)
+            gh_r = requests.get(f"https://api.github.com/search/repositories?q={urllib.parse.quote(q_term)}&sort=stars&per_page=3", headers=self.gh_headers, timeout=10)
             if gh_r.status_code == 200:
                 gh_results = [item.get("full_name") for item in gh_r.json().get("items", [])]
         except Exception:
@@ -365,7 +436,7 @@ class SentinelEvolutionEngine:
             ),
             "requires_api_key": False,
             "key_env_name": "",
-            "signup_url": "[https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)",
+            "signup_url": "https://huggingface.co/settings/tokens",
             "integration_code_snippet": f"# Verified Auto-Discovered Plugin: {verified_tool}\ndef execute_verified_model(prompt):\n    return '{verified_tool}: ' + prompt\n"
         }
 
@@ -427,7 +498,6 @@ class SentinelEvolutionEngine:
             return False, f"خطأ أثناء الدمج: {str(e)}"
 
     def reverse_engineer_video_style(self, video_caption_or_desc, video_unique_id=""):
-        # إذا أرسل المستخدم فيديو بدون وصف مكتوب، نفحص أولاً ما إذا كان يطابق الأوضاع السينمائية أو الفيروسية الموجودة
         if not video_caption_or_desc.strip():
             return {
                 "is_duplicate": True,
@@ -465,7 +535,6 @@ class SentinelEvolutionEngine:
             s_i = clean.find("{")
             e_i = clean.rfind("}")
             parsed = json.loads(clean[s_i:e_i + 1])
-            # فحص ثانٍ صارم على النتيجة التي ولدها الذكاء الاصطناعي
             dup_check, matched = db.check_duplicate_mode(
                 parsed.get("mode_id", ""),
                 parsed.get("arabic_name", ""),
@@ -500,3 +569,4 @@ class SentinelEvolutionEngine:
 
 sentinel = SentinelEvolutionEngine()
 video_engine = VideoProductionEngine()
+viral_engine = ViralGrowthEngine()
