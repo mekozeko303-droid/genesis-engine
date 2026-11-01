@@ -1,229 +1,249 @@
-import os
-import re
+# -*- coding: utf-8 -*-
+"""
+Genesis Cinema Studio — database.py
+الذاكرة الدائمة: وضع كل مستخدم، الحصة اليومية، فيديوهات الأمثلة (file_id)،
+والمقاطع المستخدمة سابقاً (لمنع التكرار). تُحفظ في ملف JSON بكتابة آمنة (atomic)،
+مع نسخة احتياطية اختيارية في Supabase.
+
+جدول Supabase (نفّذ مرة واحدة في SQL Editor إن أردت النسخ الاحتياطي):
+    create table if not exists genesis_state (
+        id text primary key,
+        data jsonb not null,
+        updated_at timestamptz default now()
+    );
+"""
+from __future__ import annotations
+
+import asyncio
 import json
+import logging
+import os
 import time
-import difflib
-import requests
-from config import Config
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+
+import httpx
+
+import config
+
+log = logging.getLogger("genesis.db")
+
+_MAX_USED_ASSETS = 400   # نتذكر آخر 400 مقطع لكل مصدر لمنع إعادة استخدامها
+_MAX_HISTORY = 200
 
 
-class GenesisDatabase:
-    def __init__(self):
-        self.base_url = f"{Config.SUPABASE_URL.rstrip('/')}/rest/v1"
-        self.headers = {
-            "apikey": Config.SUPABASE_SECRET_KEY,
-            "Authorization": f"Bearer {Config.SUPABASE_SECRET_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=representation"
-        }
-        self.local_file = "genesis_persistent_memory.json"
-        self._init_local_cache()
+def _default() -> dict:
+    return {
+        "version": 1,
+        "users": {},
+        "assets": {"pixabay": [], "wikimedia": []},
+        "samples": {},
+        "history": [],
+        "stats": {"videos": 0, "failures": 0},
+    }
 
-    def _init_local_cache(self):
-        if not os.path.exists(self.local_file):
-            initial_data = {
-                "schema_version": 12,
-                "modes": Config.DEFAULT_MODES,
-                "cloned_video_ids": {},
-                "api_keys": {},
-                "lessons": [
-                    {"context": "higgsfield_style", "rule": "Use multi-shot storytelling: Wide establishing shot, Medium action shot, Close-up expressive shot, Epic climax shot."},
-                    {"context": "character_lock", "rule": "Lock character clothing, age, and facial features across every scene in the project."}
-                ],
-                "quota": {
-                    "used_pct": 0.0,
-                    "last_reset": time.time(),
-                    "active_node": "Node_1"
-                },
-                "pending_upgrades": {}
-            }
-            self._save_local(initial_data)
-        else:
-            data = self._load_local()
-            stored_modes = data.get("modes", {})
-            # مسح جميع فيديوهات الشاشة الزرقاء القديمة (أقل من الإصدار 12) نهائياً
-            reset_blue_videos = data.get("schema_version", 0) < 12
-            clean_modes = {}
 
-            for k, v in Config.DEFAULT_MODES.items():
-                old_sample = "" if reset_blue_videos else stored_modes.get(k, {}).get("sample_file_id", "")
-                clean_modes[k] = {**v, "sample_file_id": old_sample}
+class Database:
+    def __init__(self, path: Path = config.DB_PATH):
+        self.path = Path(path)
+        self.data: dict = _default()
+        self._lock = asyncio.Lock()
+        self._used: dict[str, set] = {}
 
-            for k, v in stored_modes.items():
-                if k not in Config.DEFAULT_MODES:
-                    is_dup, _ = self._check_against_dict(clean_modes, k, v.get("name", ""), v.get("style", ""))
-                    if not is_dup:
-                        if reset_blue_videos:
-                            v["sample_file_id"] = ""
-                        clean_modes[k] = v
+    # ───────────────────────── تحميل / حفظ ─────────────────────────
+    async def load(self) -> None:
+        loaded: Optional[dict] = None
+        if self.path.exists():
+            try:
+                loaded = json.loads(self.path.read_text(encoding="utf-8"))
+            except Exception as e:  # ملف تالف → نحتفظ به باسم آخر ونبدأ نظيفاً
+                bad = self.path.with_suffix(f".corrupt-{int(time.time())}.json")
+                try:
+                    self.path.rename(bad)
+                except OSError:
+                    pass
+                log.error("ملف الذاكرة تالف (%s) — نُقل إلى %s", e, bad.name)
+        if loaded is None:
+            loaded = await self._remote_pull()
+        if isinstance(loaded, dict):
+            base = _default()
+            base.update(loaded)
+            for k, v in _default().items():
+                base.setdefault(k, v)
+            self.data = base
+        self._rebuild_used()
+        log.info("الذاكرة جاهزة: %d مستخدم", len(self.data["users"]))
 
-            data["schema_version"] = 12
-            data["modes"] = clean_modes
-            data.setdefault("cloned_video_ids", {})
-            data.setdefault("pending_upgrades", {})
-            data.setdefault("api_keys", {})
-            self._save_local(data)
+    def _rebuild_used(self) -> None:
+        self._used = {k: set(v) for k, v in self.data.get("assets", {}).items()}
 
-    def _load_local(self):
-        try:
-            with open(self.local_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            fallback = {
-                "schema_version": 12,
-                "modes": Config.DEFAULT_MODES,
-                "cloned_video_ids": {},
-                "api_keys": {},
-                "lessons": [],
-                "quota": {"used_pct": 0.0, "last_reset": time.time(), "active_node": "Node_1"},
-                "pending_upgrades": {}
-            }
-            self._save_local(fallback)
-            return fallback
+    def _write_atomic(self, text: str) -> None:
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, self.path)
 
-    def _save_local(self, data):
-        with open(self.local_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+    async def save(self, remote: bool = False) -> None:
+        async with self._lock:
+            text = json.dumps(self.data, ensure_ascii=False)
+            try:
+                await asyncio.to_thread(self._write_atomic, text)
+            except Exception:
+                log.exception("تعذّر حفظ الذاكرة محلياً")
+        if remote:
+            await self._remote_push()
 
-    @staticmethod
-    def _normalize_text(txt):
-        txt = re.sub(r"[^\w\s]", " ", txt.lower())
-        stop_words = {"وضع", "الوضع", "فيديو", "نمط", "استوديو", "مدير", "و", "في", "على", "مع", "من", "style", "video", "mode"}
-        tokens = [w.removeprefix("ال") for w in txt.split() if w not in stop_words and len(w) > 2]
-        return set(tokens)
+    async def flush(self) -> None:
+        await self.save(remote=True)
 
-    def _check_against_dict(self, modes_dict, mode_id, arabic_name, style_prompt, video_unique_id=""):
-        data = self._load_local()
-        if video_unique_id:
-            mapped_mode = data.get("cloned_video_ids", {}).get(video_unique_id)
-            if mapped_mode and mapped_mode in modes_dict:
-                return True, modes_dict[mapped_mode]
+    # ───────────────────────── Supabase (اختياري) ─────────────────────────
+    def _remote_enabled(self) -> bool:
+        return bool(config.SUPABASE_URL and config.SUPABASE_KEY)
 
-        new_tokens = self._normalize_text(f"{arabic_name} {style_prompt}")
-
-        for existing_id, info in modes_dict.items():
-            if existing_id == mode_id:
-                return True, info
-
-            existing_keywords = set(info.get("keywords", []))
-            existing_tokens = self._normalize_text(
-                f"{info.get('name', '')} {info.get('desc', '')} {info.get('style', '')} {' '.join(existing_keywords)}"
-            )
-
-            overlap = new_tokens.intersection(existing_tokens)
-            keyword_hits = new_tokens.intersection({k.removeprefix("ال").lower() for k in existing_keywords})
-
-            if len(keyword_hits) >= 1 or len(overlap) >= 2:
-                return True, info
-
-            name_sim = difflib.SequenceMatcher(None, arabic_name, info.get("name", "")).ratio()
-            style_sim = difflib.SequenceMatcher(None, style_prompt.lower(), info.get("style", "").lower()).ratio()
-            if name_sim > 0.58 or style_sim > 0.58:
-                return True, info
-
-        return False, None
-
-    def get_all_modes(self):
-        return self._load_local().get("modes", Config.DEFAULT_MODES)
-
-    def check_duplicate_mode(self, mode_id, arabic_name, style_prompt, video_unique_id=""):
-        return self._check_against_dict(self.get_all_modes(), mode_id, arabic_name, style_prompt, video_unique_id)
-
-    def add_dynamic_mode(self, mode_id, name, style_prompt, desc="نمط مخصص", sample_file_id="", video_unique_id="", cost_pct=4.0):
-        is_dup, existing_info = self.check_duplicate_mode(mode_id, name, style_prompt, video_unique_id)
-        if is_dup:
-            return False, existing_info
-
-        data = self._load_local()
-        new_mode = {
-            "name": f"✨ {name.replace('✨', '').strip()}",
-            "engine": "hybrid_router",
-            "cost_pct": cost_pct,
-            "est_time": "45 إلى 65 ثانية",
-            "voice": "ar-SA-HamedNeural",
-            "afilt": "atempo=1.05",
-            "vfilter": "eq=contrast=1.18:saturation=1.22",
-            "keywords": list(self._normalize_text(name)),
-            "sample_topic": f"مشهد تطبيقي يستعرض نمط {name}",
-            "style": style_prompt,
-            "desc": desc,
-            "sample_file_id": sample_file_id
-        }
-        data["modes"][mode_id] = new_mode
-        if video_unique_id:
-            data.setdefault("cloned_video_ids", {})[video_unique_id] = mode_id
-        self._save_local(data)
-        return True, new_mode
-
-    def set_mode_sample_video(self, mode_id, file_id):
-        data = self._load_local()
-        if mode_id in data["modes"]:
-            data["modes"][mode_id]["sample_file_id"] = file_id
-            self._save_local(data)
-            return True
-        return False
-
-    def save_api_key(self, service_name, api_key):
-        data = self._load_local()
-        data["api_keys"][service_name.upper()] = api_key.strip()
-        self._save_local(data)
-
-    def get_api_key(self, service_name):
-        data = self._load_local()
-        return data.get("api_keys", {}).get(service_name.upper()) or os.getenv(service_name.upper(), "").strip()
-
-    def save_lesson(self, context_tag, rule_learned):
-        data = self._load_local()
-        lesson = {"context": context_tag, "rule": rule_learned, "timestamp": int(time.time())}
-        data.setdefault("lessons", []).append(lesson)
-        if len(data["lessons"]) > 30:
-            data["lessons"] = data["lessons"][-30:]
-        self._save_local(data)
-
-    def get_relevant_lessons(self):
-        lessons = self._load_local().get("lessons", [])
-        return " | ".join([l["rule"] for l in lessons[-8:]])
-
-    def get_quota_status(self):
-        data = self._load_local()
-        q = data["quota"]
-        elapsed = time.time() - q["last_reset"]
-        if elapsed >= 86400:
-            q["used_pct"] = 0.0
-            q["last_reset"] = time.time()
-            self._save_local(data)
-            elapsed = 0
-        rem_pct = max(0.0, round(100.0 - q["used_pct"], 1))
-        rem_seconds = max(0, int(86400 - elapsed))
-        hours = rem_seconds // 3600
-        minutes = (rem_seconds % 3600) // 60
+    def _remote_headers(self) -> dict:
         return {
-            "used_pct": round(q["used_pct"], 1),
-            "remaining_pct": rem_pct,
-            "reset_in": f"{hours} ساعة و {minutes} دقيقة",
-            "active_node": q.get("active_node", "Node_1")
+            "apikey": config.SUPABASE_KEY,
+            "Authorization": f"Bearer {config.SUPABASE_KEY}",
+            "Content-Type": "application/json",
         }
 
-    def consume_quota(self, cost_pct):
-        data = self._load_local()
-        data["quota"]["used_pct"] = min(100.0, data["quota"]["used_pct"] + cost_pct)
-        data["quota"]["active_node"] = "Node_2" if data["quota"]["used_pct"] >= 50.0 else "Node_1"
-        self._save_local(data)
-        return self.get_quota_status()
+    async def _remote_pull(self) -> Optional[dict]:
+        if not self._remote_enabled():
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(
+                    f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}",
+                    params={"id": "eq.state", "select": "data"},
+                    headers=self._remote_headers(),
+                )
+            if r.status_code == 200 and r.json():
+                log.info("تمت استعادة الذاكرة من Supabase")
+                return r.json()[0]["data"]
+        except Exception as e:
+            log.warning("فشل سحب Supabase: %s", e)
+        return None
 
-    def save_pending_upgrade(self, upgrade_id, details):
-        data = self._load_local()
-        data["pending_upgrades"][upgrade_id] = details
-        self._save_local(data)
+    async def _remote_push(self) -> None:
+        if not self._remote_enabled():
+            return
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.post(
+                    f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}",
+                    params={"on_conflict": "id"},
+                    headers={**self._remote_headers(), "Prefer": "resolution=merge-duplicates"},
+                    content=json.dumps({"id": "state", "data": self.data}, ensure_ascii=False).encode("utf-8"),
+                )
+            if r.status_code >= 300:
+                log.warning("Supabase رفض الحفظ: %s %s", r.status_code, r.text[:120])
+        except Exception as e:
+            log.warning("فشل دفع Supabase: %s", e)
 
-    def get_pending_upgrade(self, upgrade_id):
-        return self._load_local().get("pending_upgrades", {}).get(upgrade_id)
+    # ───────────────────────── المستخدمون ─────────────────────────
+    @staticmethod
+    def _today() -> str:
+        tz = timezone(timedelta(hours=config.TZ_OFFSET_HOURS))
+        return datetime.now(tz).strftime("%Y-%m-%d")
 
-    def remove_pending_upgrade(self, upgrade_id):
-        data = self._load_local()
-        if upgrade_id in data.get("pending_upgrades", {}):
-            del data["pending_upgrades"][upgrade_id]
-            self._save_local(data)
+    def user(self, uid: int) -> dict:
+        key = str(uid)
+        u = self.data["users"].get(key)
+        if u is None:
+            u = {"mode": None, "pending": None, "name": "", "total": 0,
+                 "daily": {"date": "", "count": 0}, "first_seen": int(time.time())}
+            self.data["users"][key] = u
+        return u
 
+    def get_mode(self, uid: int) -> Optional[str]:
+        m = self.user(uid).get("mode")
+        return m if m in config.MODES else None
 
-db = GenesisDatabase()
+    async def set_mode(self, uid: int, mode_id: str, name: str = "") -> None:
+        u = self.user(uid)
+        u["mode"] = mode_id
+        if name:
+            u["name"] = name[:40]
+        await self.save()
+
+    async def set_pending(self, uid: int, idea: Optional[str]) -> None:
+        self.user(uid)["pending"] = idea
+        await self.save()
+
+    async def pop_pending(self, uid: int) -> Optional[str]:
+        u = self.user(uid)
+        idea = u.get("pending")
+        if idea:
+            u["pending"] = None
+            await self.save()
+        return idea
+
+    def used_today(self, uid: int) -> int:
+        d = self.user(uid)["daily"]
+        return d["count"] if d.get("date") == self._today() else 0
+
+    def remaining_quota(self, uid: int, is_admin: bool = False) -> int:
+        if is_admin:
+            return 999
+        return max(0, config.DAILY_LIMIT - self.used_today(uid))
+
+    # ───────────────────────── السجل والإحصاءات ─────────────────────────
+    async def record_success(self, uid: int, mode_id: str, idea: str, title: str, clip_ids: dict[str, list[str]]) -> None:
+        u = self.user(uid)
+        today = self._today()
+        if u["daily"].get("date") != today:
+            u["daily"] = {"date": today, "count": 0}
+        u["daily"]["count"] += 1
+        u["total"] = u.get("total", 0) + 1
+        self.data["stats"]["videos"] += 1
+        self._push_history({"ts": int(time.time()), "uid": uid, "mode": mode_id,
+                            "idea": idea[:160], "ok": True, "title": title[:80]})
+        for kind, ids in clip_ids.items():
+            self._mark_used(kind, ids)
+        await self.save(remote=True)
+
+    async def record_failure(self, uid: int, mode_id: str, idea: str, reason: str) -> None:
+        self.data["stats"]["failures"] += 1
+        self._push_history({"ts": int(time.time()), "uid": uid, "mode": mode_id,
+                            "idea": idea[:160], "ok": False, "reason": reason[:160]})
+        await self.save()
+
+    def _push_history(self, item: dict) -> None:
+        h = self.data["history"]
+        h.append(item)
+        del h[:-_MAX_HISTORY]
+
+    def stats(self) -> dict:
+        s = dict(self.data["stats"])
+        s["users"] = len(self.data["users"])
+        s["samples"] = len(self.data["samples"])
+        return s
+
+    # ───────────────────────── منع تكرار المقاطع ─────────────────────────
+    def is_asset_used(self, kind: str, ref: str) -> bool:
+        return str(ref) in self._used.get(kind, set())
+
+    def _mark_used(self, kind: str, refs) -> None:
+        lst = self.data["assets"].setdefault(kind, [])
+        for r in refs:
+            r = str(r)
+            if r not in lst:
+                lst.append(r)
+        del lst[:-_MAX_USED_ASSETS]
+        self._used[kind] = set(lst)
+
+    # ───────────────────────── فيديوهات الأمثلة ─────────────────────────
+    def get_sample(self, mode_id: str) -> Optional[dict]:
+        """يرجع {"file_id":..., "path":...} أو None. الأولوية لملف يضعه المالك يدوياً في data/samples."""
+        manual = config.SAMPLES_DIR / f"{mode_id}.mp4"
+        rec = self.data["samples"].get(mode_id, {})
+        file_id = rec.get("file_id")
+        if manual.exists() and manual.stat().st_size > 1024:
+            return {"file_id": file_id if rec.get("path") == str(manual) else None, "path": str(manual)}
+        if file_id:
+            return {"file_id": file_id, "path": None}
+        return None
+
+    async def set_sample(self, mode_id: str, path: Optional[str], file_id: Optional[str]) -> None:
+        self.data["samples"][mode_id] = {"path": path, "file_id": file_id, "ts": int(time.time())}
+        await self.save(remote=True)
