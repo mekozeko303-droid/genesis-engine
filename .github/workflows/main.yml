@@ -7,7 +7,6 @@ on:
   schedule:
     - cron: '0 */6 * * *'
 
-# منع تشغيل أكثر من نسخة في نفس اللحظة عند تعديل الملفات لتجنب FloodWait من تيليجرام
 concurrency:
   group: genesis-immortal-single-instance
   cancel-in-progress: true
@@ -25,6 +24,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Install System FFmpeg
+        run: |
+          sudo apt-get update -y || true
+          sudo apt-get install -y ffmpeg || true
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -41,6 +45,7 @@ jobs:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUB_KEY: ${{ secrets.SUPABASE_PUB_KEY }}
