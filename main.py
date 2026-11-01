@@ -3,10 +3,11 @@ import sys
 import time
 import asyncio
 from pyrogram import Client, filters, idle
+from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
 from database import db
-from sentinel_evolution import sentinel, video_engine
+from sentinel_evolution import sentinel, video_engine, viral_engine
 
 if not Config.BOT_TOKEN:
     print("❌ خطأ: لم يتم العثور على TELEGRAM_BOT_TOKEN في GitHub Secrets!")
@@ -33,7 +34,7 @@ def get_main_dashboard(user_id):
     quota = db.get_quota_status()
 
     text = (
-        "👑 **إمبراطورية Genesis Engine الخالدة (v6.5 Zero-Fail Video Studio)**\n"
+        "👑 **إمبراطورية Genesis Engine الخالدة (v7.0 Viral Growth Edition)**\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 **الوضع النشط حالياً:** `{m_info['name']}`\n"
         f"⏱️ **مدة تجهيز الفيديو في هذا الوضع:** `{est_time}`\n"
@@ -41,19 +42,22 @@ def get_main_dashboard(user_id):
         f"🔋 **رصيد المعالجة اليومي المتبقي:** `{quota['remaining_pct']}%`\n"
         f"⏳ **يتجدد الرصيد بالكامل بعد:** `{quota['reset_in']}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 *اكتب فكرة الفيديو مباشرة في المحادثة ليقوم البوت بإنتاج وإرسال الفيديو (`.mp4`) بالصوت العربي فوراً!*"
+        "💡 *اكتب فكرة الفيديو مباشرة في المحادثة ليصنع البوت الفيديو مع خطاف فيروسي وهاشتاجات لأعلى المشاهدات!*"
     )
 
     buttons = [
         [
-            InlineKeyboardButton("🎬 الأوضاع الـ 17 (مع نموذج فيديو جاهز لكل وضع)", callback_data="menu_modes_0"),
+            InlineKeyboardButton("🎬 الأوضاع الـ 17 (مع نموذج فيديو لكل وضع)", callback_data="menu_modes_0"),
             InlineKeyboardButton("📊 الموارد والذاكرة", callback_data="menu_quota")
+        ],
+        [
+            InlineKeyboardButton("🔥 رادار التريندات والتعلم الفيروسي (أعلى مشاهدات)", callback_data="menu_viral_radar")
         ],
         [
             InlineKeyboardButton("🔬 فحص خبر أو البحث التلقائي عن أداة جديدة", callback_data="menu_eval_news")
         ],
         [
-            InlineKeyboardButton("🧬 استنساخ وضع جديد (مع كاشف التكرار الصارم)", callback_data="menu_clone_style"),
+            InlineKeyboardButton("🧬 استنساخ وضع جديد (مع كاشف التكرار)", callback_data="menu_clone_style"),
             InlineKeyboardButton("🔑 إضافة مفتاح API", callback_data="menu_add_key")
         ]
     ]
@@ -146,6 +150,33 @@ async def handle_callbacks(client, cq):
         else:
             await cq.message.edit_text(text, reply_markup=markup)
 
+    elif data == "menu_viral_radar":
+        wait_v = await cq.message.edit_text("🔥 **جاري الاتصال بالإنترنت وسحب التريندات الحية وتعلم خوارزمية الانتشار اليوم...**")
+        viral_info = await asyncio.to_thread(viral_engine.learn_new_viral_rule_from_web)
+        trends_str = " ، ".join(viral_info["trends"][:6])
+        suggested_topic = viral_info["suggested_viral_topic"]
+        USER_STATE[uid]["suggested_trend"] = suggested_topic
+
+        msg = (
+            "🔥 **رادار التريندات والتعلم الفيروسي الحي من الإنترنت:**\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🌍 **الأكثر بحثاً ورواجاً الآن:**\n`{trends_str}`\n\n"
+            f"🧠 **القاعدة الفيروسية الجديدة التي تعلمها البوت وحفظها في ذاكرته الآن:**\n{viral_info['rule_ar']}\n\n"
+            f"💡 **فكرة فيديو مقترحة لحصد أعلى المشاهدات اليوم:**\n`{suggested_topic}`"
+        )
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"🎬 أنتج فيديو الآن عن: {suggested_topic[:25]}", callback_data="produce_trend_now")],
+            [InlineKeyboardButton("🔄 تعلم حيلة فيروسية جديدة من النت", callback_data="menu_viral_radar")],
+            [InlineKeyboardButton("🔙 اللوحة الرئيسية", callback_data="menu_home")]
+        ])
+        await wait_v.edit_text(msg, reply_markup=buttons)
+
+    elif data == "produce_trend_now":
+        trend_topic = USER_STATE.get(uid, {}).get("suggested_trend", "أسرار الذكاء الاصطناعي الخفية")
+        await cq.message.delete()
+        fake_msg = await client.send_message(uid, f"🔥 **جاري بدء إنتاج فيديو فيروسي عن تريند اليوم:** `{trend_topic}`")
+        await produce_video_for_topic(client, uid, trend_topic, fake_msg)
+
     elif data.startswith("menu_modes_"):
         page = int(data.split("_")[-1])
         msg_text = (
@@ -191,7 +222,6 @@ async def handle_callbacks(client, cq):
         await cq.message.delete()
         sample_vid = m_info.get("sample_file_id", "")
 
-        # 1. إذا كان الفيديو محفوظاً في تيليجرام، يظهر في أقل من ثانية!
         if sample_vid:
             try:
                 await client.send_video(uid, sample_vid, caption=caption, reply_markup=buttons)
@@ -199,7 +229,6 @@ async def handle_callbacks(client, cq):
             except Exception:
                 pass
 
-        # 2. إرسال النموذج المطابق للأصل وحفظه للأبد في ذاكرة تيليجرام والـ Repo
         wait_prev = await client.send_message(
             uid,
             f"🎬 **جاري فتح نموذج الفيديو المطابق للأصل لوضع ({m_info['name']})...**"
@@ -226,13 +255,13 @@ async def handle_callbacks(client, cq):
         q = db.get_quota_status()
         lessons = db.get_relevant_lessons()
         msg = (
-            "📊 **تقرير وكيل الموارد والذاكرة الحية:**\n"
+            "📊 **تقرير وكيل الموارد والذاكرة الفيروسية الحية:**\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"🔹 **المستهلك اليوم:** `{q['used_pct']}%`\n"
             f"🔹 **المتبقي اليوم:** `{q['remaining_pct']}%`\n"
             f"🔹 **موعد التجديد القادم:** بعد `{q['reset_in']}`\n"
             f"🔹 **الحساب النشط:** `{q['active_node']}` (يبدل تلقائياً بين حسابيك)\n\n"
-            f"🧠 **آخر الدروس المتعلمة في الذاكرة:**\n`{lessons}`"
+            f"🧠 **آخر قواعد الانتشار والمشاهدات المتعلمة في الذاكرة:**\n`{lessons}`"
         )
         await cq.message.edit_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="menu_home")]]))
 
@@ -250,7 +279,7 @@ async def handle_callbacks(client, cq):
         await cq.message.edit_text(
             "🧬 **وكيل الهندسة العكسية واستنساخ الأنماط (مع كاشف التكرار الصارم):**\n\n"
             "أرسل الآن **الفيديو مع كتابة اسم النمط الجديد في الوصف** (أو اكتب وصف النمط الجديد الذي لا يوجد ضمن الأوضاع الـ 17).\n"
-            "⛔ *إذا كان النمط مشابهاً لأي وضع موجود لديك مسبقاً (مثل السينمائي أو السريع أو الأنمي...) سيرفضه البوت فوراً ويخبرك باسم الوضع الموجود عندك!*",
+            "⛔ *إذا كان النمط مشابهاً لأي وضع موجود لديك مسبقاً سيرفضه البوت فوراً ويخبرك باسم الوضع الموجود عندك!*",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 إلغاء", callback_data="menu_home")]])
         )
 
@@ -268,6 +297,65 @@ async def handle_callbacks(client, cq):
         await execute_upgrade_flow(client, cq.message.chat.id, uid, upg_id, status_message=cq.message)
 
 
+async def produce_video_for_topic(client, uid, topic_text, status_msg):
+    mode_key = USER_STATE.get(uid, {}).get("mode", "hybrid")
+    modes = db.get_all_modes()
+    m_info = modes.get(mode_key, modes["hybrid"])
+    default_mode = Config.DEFAULT_MODES.get(mode_key, {})
+    for field in ["est_time", "voice", "afilt", "vfilter"]:
+        if field in default_mode:
+            m_info[field] = default_mode[field]
+
+    est_time = m_info.get("est_time", "45 إلى 70 ثانية")
+
+    async def update_progress(step_text):
+        try:
+            await status_msg.edit_text(
+                f"🎬 **جاري صناعة وريندر الفيديو الفيروسي الخاص بك...**\n"
+                f"▪️ **الوضع:** `{m_info['name']}` (المدة المقدرة: `{est_time}`)\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"{step_text}"
+            )
+        except Exception:
+            pass
+
+    try:
+        final_video_path, script_data = await video_engine.render_full_video(
+            topic_text,
+            mode_key,
+            m_info,
+            progress_callback=update_progress,
+            num_scenes=3
+        )
+        quota_after = db.consume_quota(m_info["cost_pct"])
+
+        video_caption = (
+            f"✅ **تم إنتاج الفيديو الفيروسي بنجاح!**\n"
+            f"🧲 **العنوان الجاذب للمشاهدات:**\n`{script_data.get('title_ar', '')}`\n\n"
+            f"🎙️ **الخطاف والنص الصوتي:**\n{script_data.get('voiceover_ar', '')}\n\n"
+            f"📈 **هاشتاجات الانتشار (انسخها مع الفيديو):**\n`{script_data.get('hashtags', '#اكسبلور #تريند')}`\n\n"
+            f"💬 **التعليق المثبت لرفع اللايكات والتعليقات:**\n`{script_data.get('pinned_comment', '')}`\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔋 **الحصة المتبقية اليوم:** `{quota_after['remaining_pct']}%`"
+        )
+
+        await client.send_video(
+            uid,
+            final_video_path,
+            caption=video_caption[:1020],
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔥 رادار التريندات الفيروسية", callback_data="menu_viral_radar")],
+                [InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]
+            ])
+        )
+        await status_msg.delete()
+    except Exception as e:
+        await status_msg.edit_text(
+            f"⚠️ حدث خطأ غير متوقع: `{str(e)[:150]}`",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
+        )
+
+
 @app.on_message((filters.text | filters.video) & filters.private)
 async def handle_user_input(client, message):
     if message.id in PROCESSED_MESSAGES:
@@ -280,7 +368,6 @@ async def handle_user_input(client, message):
     mode_key = USER_STATE[uid].get("mode", "hybrid")
     text = (message.text or message.caption or "").strip()
 
-    # 0. تأكيد التطوير بكلمة "نعم"
     if action and action.startswith("confirm_upgrade_"):
         upg_id = action.replace("confirm_upgrade_", "")
         if text in ["نعم", "ايوه", "أيوه", "موافق", "ايه", "اضفه", "تحديث", "طوره", "yes", "ok"]:
@@ -292,7 +379,6 @@ async def handle_user_input(client, message):
             await message.reply_text("❌ تم إلغاء التحديث بناءً على طلبك.")
             return
 
-    # 1. حفظ فيديو تذكيري خاص لوضع معين
     if action and action.startswith("awaiting_sample_vid_"):
         target_mode = action.replace("awaiting_sample_vid_", "")
         USER_STATE[uid]["action"] = None
@@ -306,7 +392,6 @@ async def handle_user_input(client, message):
             await message.reply_text("⚠️ يرجى إرسال ملف فيديو صالح.")
         return
 
-    # 2. استنساخ وضع جديد مع المنع الصارم للتكرار
     if action == "awaiting_style_clone":
         USER_STATE[uid]["action"] = None
         wait_msg = await message.reply_text("🔍 **جاري فحص الفيديو والنمط ومطابقته مع الأوضاع الـ 17 لمنع أي تكرار...**")
@@ -350,7 +435,6 @@ async def handle_user_input(client, message):
         )
         return
 
-    # 3. معالجة الفيديو في وضع استنساخ الوجه والحذف
     if message.video and mode_key == "cloning":
         proc_msg = await message.reply_text(
             "🧬 **جاري معالجة الفيديو في وضع (استنساخ الوجه والحذف)...**\n"
@@ -371,7 +455,6 @@ async def handle_user_input(client, message):
         await proc_msg.delete()
         return
 
-    # 4. فحص الأخبار أو البحث التلقائي ("ابحث انت وقلي")
     if action == "awaiting_news":
         wait_msg = await message.reply_text("🛰️ **جاري الاتصال المباشر بـ HuggingFace وGitHub لجلب أحدث نموذج حقيقي موثق...**")
         report = await asyncio.to_thread(sentinel.evaluate_user_news, text)
@@ -397,7 +480,6 @@ async def handle_user_input(client, message):
         await wait_msg.edit_text(reply, reply_markup=InlineKeyboardMarkup(buttons))
         return
 
-    # 5. حفظ مفتاح API يدوي
     if action == "awaiting_manual_key":
         USER_STATE[uid]["action"] = None
         if ":" in text:
@@ -408,14 +490,8 @@ async def handle_user_input(client, message):
             await message.reply_text("⚠️ الصيغة غير صحيحة. أرسله هكذا: `NAME:KEY`")
         return
 
-    # 6. إنتاج الفيديو الكامل (.mp4) بالصوت العربي لأي موضوع يكتبه المستخدم
     modes = db.get_all_modes()
     m_info = modes.get(mode_key, modes["hybrid"])
-    default_mode = Config.DEFAULT_MODES.get(mode_key, {})
-    for field in ["est_time", "voice", "afilt", "vfilter"]:
-        if field in default_mode:
-            m_info[field] = default_mode[field]
-
     est_time = m_info.get("est_time", "45 إلى 70 ثانية")
     quota_before = db.get_quota_status()
 
@@ -427,57 +503,24 @@ async def handle_user_input(client, message):
         return
 
     status_msg = await message.reply_text(
-        f"🎬 **بدأ إنتاج الفيديو الحقيقي لمشروعك!**\n"
+        f"🎬 **بدأ إنتاج الفيديو الفيروسي لمشروعك!**\n"
         f"▪️ **الموضوع:** `{text[:50]}`\n"
         f"▪️ **الوضع النشط:** `{m_info['name']}`\n"
         f"⏱️ **المدة المقدرة للتجهيز:** `{est_time}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "⏳ *جاري البدء بالخطوة 1 من 4...*"
     )
+    await produce_video_for_topic(client, uid, text or "طفل يلعب كرة القدم بمهارة مذهلة", status_msg)
 
-    async def update_progress(step_text):
+
+async def auto_viral_learning_daemon():
+    """يتعلم تلقائياً من تريندات الإنترنت كل ساعة ويحدث ذاكرة البوت الفيروسية"""
+    while True:
+        await asyncio.sleep(3600)
         try:
-            await status_msg.edit_text(
-                f"🎬 **جاري صناعة وريندر الفيديو الخاص بك...**\n"
-                f"▪️ **الوضع:** `{m_info['name']}` (المدة المقدرة: `{est_time}`)\n"
-                "━━━━━━━━━━━━━━━━━━━━━\n"
-                f"{step_text}"
-            )
+            await asyncio.to_thread(viral_engine.learn_new_viral_rule_from_web)
         except Exception:
             pass
-
-    try:
-        final_video_path, script_data = await video_engine.render_full_video(
-            text or "طفل يلعب كرة القدم في ملعب مشمس",
-            mode_key,
-            m_info,
-            progress_callback=update_progress,
-            num_scenes=3
-        )
-        quota_after = db.consume_quota(m_info["cost_pct"])
-
-        video_caption = (
-            f"✅ **تم إنتاج الفيديو بنجاح!**\n"
-            f"🎬 **العنوان:** {script_data.get('title_ar', '')}\n"
-            f"🎯 **الوضع:** `{m_info['name']}`\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎙️ **النص الصوتي العربي:**\n{script_data.get('voiceover_ar', '')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔋 **الحصة المتبقية اليوم:** `{quota_after['remaining_pct']}%` (تتجدد بعد `{quota_after['reset_in']}`)"
-        )
-
-        await client.send_video(
-            uid,
-            final_video_path,
-            caption=video_caption[:1020],
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
-        )
-        await status_msg.delete()
-    except Exception as e:
-        await status_msg.edit_text(
-            f"⚠️ حدث خطأ غير متوقع: `{str(e)[:150]}`",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 اللوحة الرئيسية", callback_data="menu_home")]])
-        )
 
 
 async def immortal_lifecycle_watchdog():
@@ -491,12 +534,21 @@ async def immortal_lifecycle_watchdog():
 
 
 async def start_genesis():
-    print("🚀 Starting Genesis Immortal Engine v6.5...")
-    await app.start()
+    print("🚀 Starting Genesis Immortal Engine v7.0 (FloodWait Immune + Viral Learning)...")
+    # حماية تلقائية كاملة ضد FloodWait: إذا طلب تيليجرام الانتظار، ينتظر البوت تلقائياً دون أن يفشل
+    while True:
+        try:
+            await app.start()
+            break
+        except FloodWait as e:
+            wait_sec = int(getattr(e, "value", 60)) + 5
+            print(f"⏳ Telegram FloodWait active: sleeping {wait_sec}s automatically without failing...")
+            await asyncio.sleep(wait_sec)
+
     asyncio.create_task(immortal_lifecycle_watchdog())
-    # تشغيل التجهيز المسبق لنماذج الفيديو في الخلفية فور الإقلاع
+    asyncio.create_task(auto_viral_learning_daemon())
     asyncio.create_task(video_engine.prewarm_all_modes_background())
-    print("✅ Bot is online and pre-warming mode sample videos!")
+    print("✅ Bot is online 24/7, learning viral trends, and ready to render MP4 videos!")
     await idle()
     await app.stop()
 
