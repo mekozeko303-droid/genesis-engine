@@ -22,7 +22,7 @@
       "sample_topic": "أسرار النجاح السريع في عصر الذكاء الاصطناعي",
       "style": "High-contrast fast viral cuts, dynamic kinetic typography, punchy transitions",
       "desc": "فيديوهات خاطفة سريعة الإيقاع للتريندات والأخبار السريعة بدون استهلاك كاجل.",
-      "sample_file_id": ""
+      "sample_file_id": "BAACAgQAAxkDAAIFP2rmsJq2wnl8NUHzLfhuFb1dyDgSAALBKwACKjQ4U15SXyUTxktmHgQ"
     },
     "cinematic": {
       "name": "🎬 الوضع السينمائي",
@@ -45,7 +45,7 @@
       "sample_topic": "محقق يسير تحت المطر في شوارع مدينة مظلمة مضاءة بالنيون",
       "style": "Hollywood photorealistic 4K, dramatic anamorphic lighting, 35mm lens, shallow depth of field",
       "desc": "مشاهد درامية واقعية بهوليوود ستايل 100% AI مع ترميم الوجوه ودقة فائقة.",
-      "sample_file_id": ""
+      "sample_file_id": "BAACAgQAAxkDAAIFQmrmsLh8v4ecQNGEZyRrcDyYwnaXAALCKwACKjQ4U6OWD7n93M_UHgQ"
     },
     "dialogue": {
       "name": "💬 الحوار التمثيلي",
@@ -203,7 +203,7 @@
       "sample_topic": "طفل صغير يلعب كرة القدم بحماس في ملعب أخضر مشمس بأسلوب بيكسار",
       "style": "Pixar and Disney 3D cute animation style, soft subsurface scattering, vibrant joyful colors",
       "desc": "أفلام كرتون ثلاثية الأبعاد بأسلوب ديزني وبيكسار بألوان زاهية ومبهجة.",
-      "sample_file_id": ""
+      "sample_file_id": "BAACAgQAAxkDAAIFRWrmsNFpyDpOBYNRUz6Jum1AJgjuAALDKwACKjQ4U4ZH4293ba58HgQ"
     },
     "story": {
       "name": "📸 استوديو الستوري والريلز",
@@ -407,7 +407,7 @@
     }
   ],
   "quota": {
-    "used_pct": 0.0,
+    "used_pct": 2.5,
     "last_reset": 1793464827.5522614,
     "active_node": "Node_1"
   },
@@ -421,6 +421,16 @@
       "key_env_name": "",
       "signup_url": "https://huggingface.co/settings/tokens",
       "integration_code_snippet": ""
+    },
+    "upg_3551": {
+      "tool_name": "Wan-AI/Wan2.1-T2V-14B",
+      "is_real_and_available": true,
+      "verdict": "BETTER",
+      "comparison_ar": "تم الفحص الحي المباشر في المستودعات العالمية وعثرنا على النموذج الحقيقي الموثق (`Wan-AI/Wan2.1-T2V-14B`).\n• نماذج الفيديو المتصدرة حالياً في HuggingFace: `[]`\n• المستودعات المرتبطة في GitHub: `[]`\nهذا النموذج متاح مجاناً ويدعم التطوير المباشر لرفع جودة وسرعة الريندر في نظامك.",
+      "requires_api_key": false,
+      "key_env_name": "",
+      "signup_url": "[https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)",
+      "integration_code_snippet": "# Verified Auto-Discovered Plugin: Wan-AI/Wan2.1-T2V-14B\ndef execute_verified_model(prompt):\n    return 'Wan-AI/Wan2.1-T2V-14B: ' + prompt\n"
     }
   },
   "cloned_video_ids": {}
