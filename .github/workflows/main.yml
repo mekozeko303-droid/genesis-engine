@@ -1,67 +1,49 @@
-name: Genesis Immortal Engine 24-7
+name: Genesis Cinema Studio
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [main]
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: "*/30 * * * *"   # شبكة أمان: إن انتهت الجلسة السابقة تبدأ التالية فوراً
 
 concurrency:
-  group: genesis-immortal-single-instance
-  cancel-in-progress: true
-
-permissions:
-  contents: write
-  actions: write
+  group: genesis-bot
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
-  run-genesis:
+  run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
-
+    timeout-minutes: 350
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install System FFmpeg
-        run: |
-          sudo apt-get update -y || true
-          sudo apt-get install -y ffmpeg || true
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: pip
 
-      - name: Install Dependencies
+      - name: FFmpeg + خط عربي
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg fonts-noto-core
 
-      - name: Run Genesis Immortal Bot
+      - name: تثبيت المكتبات
+        run: pip install -r requirements.txt
+
+      - name: تشغيل البوت
+        run: python main.py
         env:
+          PYTHONUNBUFFERED: "1"
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_PUB_KEY: ${{ secrets.SUPABASE_PUB_KEY }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          KAGGLE_USER_1: ${{ secrets.KAGGLE_USER_1 }}
-          KAGGLE_KEY_1: ${{ secrets.KAGGLE_KEY_1 }}
-          KAGGLE_USER_2: ${{ secrets.KAGGLE_USER_2 }}
-          KAGGLE_KEY_2: ${{ secrets.KAGGLE_KEY_2 }}
-          GEMINI_KEY_1: ${{ secrets.GEMINI_KEY_1 }}
-        run: |
-          python3 main.py
-
-      - name: Persist Memory State to Repo
-        if: always()
-        run: |
-          git config --local user.email "bot@genesis.ai"
-          git config --local user.name "Genesis Auto-Save"
-          git add genesis_persistent_memory.json || true
-          git diff --quiet && git diff --staged --quiet || (git commit -m "🧠 Auto-sync persistent memory" && git push)
+          PIXABAY_KEY: ${{ secrets.PIXABAY_KEY }}
+          PIXABAY_KEY_2: ${{ secrets.PIXABAY_KEY_2 }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN_2: ${{ secrets.HF_TOKEN_2 }}
+          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          FONT_FAMILY: "Noto Sans Arabic"
+          MAX_RUN_MINUTES: "335"
