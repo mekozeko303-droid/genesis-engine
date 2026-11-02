@@ -429,11 +429,48 @@ class VoiceOver:
 
 # ═════════════════════════ وكيل المشاهد: Pixabay / FLUX / Wikimedia ═════════════════════════
 _PIX_CACHE: dict[str, tuple[float, list]] = {}
+_PIX_IDX = [0]   # فهرس مفتاح Pixabay النشط (يتبدّل عند تحديد المعدل)
 
 
 def _http_status(e: Exception) -> Optional[int]:
     r = getattr(e, "response", None)
     return getattr(r, "status_code", None)
+
+
+def _is_quota_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return _http_status(e) in (402, 429) or any(w in msg for w in ("credit", "quota", "rate limit", "too many requests"))
+
+
+class HFPool:
+    """يلفّ عدة مفاتيح HuggingFace؛ عند نفاد رصيد مفتاح (402/429) ينتقل للتالي تلقائياً."""
+
+    def __init__(self, tokens: list[str]):
+        self.clients = [AsyncInferenceClient(api_key=t, timeout=150) for t in tokens]
+        self.i = 0
+
+    async def _call(self, name: str, *a, **kw):
+        last: Optional[Exception] = None
+        n = len(self.clients)
+        for step in range(n):
+            idx = (self.i + step) % n
+            try:
+                res = await getattr(self.clients[idx], name)(*a, **kw)
+                self.i = idx
+                return res
+            except Exception as e:
+                if _is_quota_error(e):
+                    log.warning("مفتاح HuggingFace رقم %d استُنفد → التبديل للتالي", idx + 1)
+                    last = e
+                    continue
+                raise
+        raise last  # type: ignore[misc]
+
+    async def chat_completion(self, *a, **kw):
+        return await self._call("chat_completion", *a, **kw)
+
+    async def text_to_image(self, *a, **kw):
+        return await self._call("text_to_image", *a, **kw)
 
 
 def _save_image(img, dest: Path) -> bool:
@@ -501,10 +538,19 @@ class AssetHub:
         c = _PIX_CACHE.get(q)
         if c and time.time() - c[0] < 3600:
             return list(c[1])
-        r = await self.http.get("https://pixabay.com/api/videos/", timeout=25, params={
-            "key": config.PIXABAY_KEY, "q": q, "per_page": 20, "safesearch": "true", "video_type": "film"})
-        if r.status_code != 200:
-            log.warning("Pixabay HTTP %s", r.status_code)
+        keys = config.PIXABAY_KEYS or [config.PIXABAY_KEY]
+        r = None
+        for _ in range(len(keys)):
+            r = await self.http.get("https://pixabay.com/api/videos/", timeout=25, params={
+                "key": keys[_PIX_IDX[0] % len(keys)], "q": q, "per_page": 20,
+                "safesearch": "true", "video_type": "film"})
+            if r.status_code in (429, 401, 403):  # معدّل/مفتاح مرفوض → المفتاح التالي
+                log.warning("مفتاح Pixabay رقم %d رُفض (%s) → التبديل", _PIX_IDX[0] % len(keys) + 1, r.status_code)
+                _PIX_IDX[0] += 1
+                continue
+            break
+        if r is None or r.status_code != 200:
+            log.warning("Pixabay HTTP %s", getattr(r, "status_code", "?"))
             return []
         hits = r.json().get("hits", [])
         _PIX_CACHE[q] = (time.time(), hits)
@@ -562,8 +608,8 @@ class AssetHub:
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                msg, st = str(e).lower(), _http_status(e)
-                if st in (402, 429) or "credit" in msg or "quota" in msg or "rate limit" in msg:
+                msg = str(e).lower()
+                if _is_quota_error(e):
                     self.flux_dead = True
                     self.notes.add("انتهت حصة توليد الصور المجانية (FLUX) — استُخدمت مصادر بديلة")
                     return None
@@ -697,9 +743,9 @@ class VideoProductionEngine:
         """يهيّئ المحرك ويرجع (أخطاء قاتلة، تحذيرات)."""
         self.http = httpx.AsyncClient(follow_redirects=True, timeout=30, headers={
             "User-Agent": "GenesisCinemaStudio/1.0 (Telegram video bot; contact: bot owner)"})
-        if AsyncInferenceClient is not None and config.HF_TOKEN:
+        if AsyncInferenceClient is not None and config.HF_TOKENS:
             try:
-                self.hf = AsyncInferenceClient(api_key=config.HF_TOKEN, timeout=150)
+                self.hf = HFPool(config.HF_TOKENS)
             except Exception as e:
                 log.warning("تعذّر تهيئة HuggingFace: %s", e)
         self.writer = ScriptWriter(self.hf)
