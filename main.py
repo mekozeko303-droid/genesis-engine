@@ -14,7 +14,9 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 import logging
+import os
 import shutil
+import signal
 import sys
 import time
 
@@ -41,6 +43,7 @@ ACTIVE_USERS: set[int] = set()          # مستخدم واحد = فيديو و�
 QUEUE: list[int] = []                   # ترتيب الانتظار
 BG_TASKS: set[asyncio.Task] = set()     # مراجع قوية للمهام الخلفية
 STARTUP_WARNINGS: list[str] = []
+SHUTTING_DOWN = False                   # عند True: لا نقبل فيديوهات جديدة
 
 A_RECEPTION = "🛎 وكيل الاستقبال"
 A_WRITER = "✍️ وكيل السيناريو"
@@ -129,6 +132,42 @@ class ProgressReporter:
         if text == self._last_text or (now - self._last_t < 2.5 and stage != "upload"):
             return
         try:
+            await self.msg.edit_text(text, parse_mode=PM)
+            self._last_text, self._last_t = text, now
+        except FloodWait:
+            self._last_t = now + 10
+        except Exception:
+            pass  # التقدّم غير حرج
+
+
+def make_caption(r: ProductionResult) -> str:
+    return f"🎬 {r.title}\n\n{' '.join(r.hashtags)}"[:1000]
+
+
+async def send_mode_card(client: Client, chat_id: int, mode: config.Mode) -> None:
+    text = (f"{mode.emoji} وضع «{mode.name_ar}»\n{mode.desc_ar}\n\n"
+            f"✍️ أرسل الآن فكرة الفيديو.\nمثال: {mode.sample_idea}")
+    sample = db.get_sample(mode.id)
+    if sample:
+        for src in (sample.get("file_id"), sample.get("path")):
+            if not src:
+                continue
+            try:
+                await client.send_video(chat_id, src, caption=text, parse_mode=PM, supports_streaming=True)
+                return
+            except Exception as e:
+                log.warning("تعذّر إرسال مثال %s: %s", mode.id, str(e)[:100])
+    await client.send_message(chat_id, text, parse_mode=PM)
+
+
+# ═════════════════════════ دورة إنتاج فيديو ═════════════════════════
+async def run_job(client: Client, chat_id: int, uid: int, idea: str, mode_id: str) -> None:
+    mode = config.MODES[mode_id]
+    status = await client.send_message(chat_id, f"{A_RECEPTION}: استلمت فكرتك ✅", parse_mode=PM)
+    rep = ProgressReporter(status, mode)
+    QUEUE.append(uid)
+    try:
+        if JOB_SEM.locked():
             await rep("queue", str(len(QUEUE)))
         async with JOB_SEM:
             if uid in QUEUE:
@@ -184,6 +223,9 @@ async def try_start(client: Client, chat_id: int, uid: int, name: str, idea: str
         await db.set_pending(uid, idea)
         await client.send_message(chat_id, f"{A_RECEPTION}: اختر وضع الإنتاج أولاً، وسأبدأ بفكرتك مباشرة 👇",
                                   reply_markup=modes_keyboard(), parse_mode=PM)
+        return
+    if SHUTTING_DOWN:
+        await client.send_message(chat_id, "🔄 البوت يعيد تشغيل نفسه (دقيقتان تقريباً). أرسل فكرتك بعد قليل.", parse_mode=PM)
         return
     if uid in ACTIVE_USERS:
         await client.send_message(chat_id, "⏳ لديك فيديو قيد الإنتاج الآن. انتظر حتى يصلك.", parse_mode=PM)
@@ -302,6 +344,18 @@ async def on_other(client: Client, message: Message):
 
 
 # ═════════════════════════ التشغيل ═════════════════════════
+async def auto_stop() -> None:
+    """بعد MAX_RUN_MINUTES: يمنع الطلبات الجديدة، ينتظر الفيديوهات الجارية (حتى 6 دقائق)، ثم يوقف البوت بسلام."""
+    global SHUTTING_DOWN
+    await asyncio.sleep(config.MAX_RUN_MINUTES * 60)
+    SHUTTING_DOWN = True
+    log.info("⏰ انتهت مدة التشغيل المحددة — إيقاف منظم")
+    deadline = time.monotonic() + 360
+    while (ACTIVE_USERS or JOB_SEM.locked()) and time.monotonic() < deadline:
+        await asyncio.sleep(5)
+    os.kill(os.getpid(), signal.SIGINT)   # يُنهي idle() فيُحفظ كل شيء ويخرج البرنامج
+
+
 async def amain() -> None:
     await db.load()
     fatal, warn = await engine.start()
@@ -316,6 +370,8 @@ async def amain() -> None:
     async with app:
         me = await app.get_me()
         log.info("✅ Genesis Cinema Studio يعمل: @%s", me.username)
+        if config.MAX_RUN_MINUTES > 0:
+            spawn(auto_stop())
         await idle()
     await engine.close()
     await db.flush()
