@@ -23,6 +23,15 @@ def _s(name: str, default: str = "") -> str:
     return (os.getenv(name) or default).strip()
 
 
+def _first(*names: str) -> str:
+    """أول متغير غير فارغ من عدة أسماء (لدعم أسماء Secrets في GitHub وأسماء .env معاً)."""
+    for n in names:
+        v = _s(n)
+        if v:
+            return v
+    return ""
+
+
 def _i(name: str, default: int) -> int:
     try:
         return int(_s(name, str(default)))
@@ -56,18 +65,26 @@ for _d in (DATA_DIR, WORK_DIR, OUTPUT_DIR, SAMPLES_DIR, FONTS_DIR, MUSIC_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ───────────────────────── تيليجرام ─────────────────────────
-API_ID = _i("API_ID", 0)
-API_HASH = _s("API_HASH")
-BOT_TOKEN = _s("BOT_TOKEN")
+try:
+    API_ID = int(_first("API_ID", "TELEGRAM_API_ID") or 0)
+except ValueError:
+    API_ID = 0
+API_HASH = _first("API_HASH", "TELEGRAM_API_HASH")
+BOT_TOKEN = _first("BOT_TOKEN", "TELEGRAM_BOT_TOKEN")
 ADMIN_IDS = {int(x) for x in _s("ADMIN_IDS").replace(" ", "").split(",") if x.isdigit()}
 
 # ───────────────────────── المفاتيح المجانية ─────────────────────────
-PIXABAY_KEY = _s("PIXABAY_KEY")   # https://pixabay.com/api/docs/  (مجاني)
-HF_TOKEN = _s("HF_TOKEN")         # https://huggingface.co/settings/tokens (للسيناريو + FLUX)
+# يدعم حتى مفتاحين لكل خدمة (حسابان): عند استنفاد الأول أو تحديد المعدل يتبدّل البوت للثاني تلقائياً.
+PIXABAY_KEYS = [k for k in dict.fromkeys(
+    [_first("PIXABAY_KEY", "PIXABAY_KEY_1"), _first("PIXABAY_KEY_2")]) if k]    # https://pixabay.com/api/docs/
+HF_TOKENS = [k for k in dict.fromkeys(
+    [_first("HF_TOKEN", "HF_TOKEN_1"), _first("HF_TOKEN_2")]) if k]             # https://huggingface.co/settings/tokens
+PIXABAY_KEY = PIXABAY_KEYS[0] if PIXABAY_KEYS else ""
+HF_TOKEN = HF_TOKENS[0] if HF_TOKENS else ""
 
 # ───────────────────────── Supabase (اختياري — نسخ احتياطي للذاكرة) ─────────────────────────
 SUPABASE_URL = _s("SUPABASE_URL").rstrip("/")
-SUPABASE_KEY = _s("SUPABASE_KEY")
+SUPABASE_KEY = _first("SUPABASE_KEY", "SUPABASE_SECRET_KEY")
 SUPABASE_TABLE = _s("SUPABASE_TABLE", "genesis_state")
 
 # ───────────────────────── نماذج الذكاء الاصطناعي (قابلة للتغيير من .env) ─────────────────────────
@@ -93,6 +110,7 @@ MAX_FINAL_MB = _i("MAX_FINAL_MB", 48)  # حد رفع البوتات في تيل�
 # ───────────────────────── حدود التشغيل ─────────────────────────
 DAILY_LIMIT = _i("DAILY_LIMIT", 5)               # فيديوهات/مستخدم/يوم (المشرفون بلا حد)
 MAX_CONCURRENT_JOBS = _i("MAX_CONCURRENT_JOBS", 1)
+MAX_RUN_MINUTES = _i("MAX_RUN_MINUTES", 0)       # >0: يوقف البوت بشكل منظم بعد هذه المدة (للمنصات ذات حد زمني)
 JOB_TIMEOUT = _i("JOB_TIMEOUT", 1200)            # ثوانٍ لكل فيديو
 FFMPEG_TIMEOUT = _i("FFMPEG_TIMEOUT", 300)
 ASSET_CONCURRENCY = _i("ASSET_CONCURRENCY", 3)
