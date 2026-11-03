@@ -13,7 +13,6 @@ from pathlib import Path
 
 try:  # اختياري: قراءة ملف .env إن وُجد
     from dotenv import load_dotenv
-
     load_dotenv()
 except Exception:  # pragma: no cover
     pass
@@ -25,25 +24,25 @@ def _s(name: str, default: str = "") -> str:
 
 
 def _first(*names: str) -> str:
-    """أول متغير غير فارغ من عدة أسماء (لدعم أسماء Secrets في GitHub وأسماء .env معاً)."""
-    for n in names:
-        v = _s(n)
-        if v:
-            return v
+    """أول متغير غير فارغ من عدة أسماء."""
+    for name in names:
+        value = _s(name)
+        if value:
+            return value
     return ""
 
 
 def _i(name: str, default: int) -> int:
     try:
         return int(_s(name, str(default)))
-    except ValueError:
+    except (TypeError, ValueError):
         return default
 
 
 def _f(name: str, default: float) -> float:
     try:
         return float(_s(name, str(default)))
-    except ValueError:
+    except (TypeError, ValueError):
         return default
 
 
@@ -54,71 +53,88 @@ def _b(name: str, default: bool) -> bool:
 # ───────────────────────── المسارات ─────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(_s("DATA_DIR", str(BASE_DIR / "data")))
-WORK_DIR = DATA_DIR / "work"          # ملفات مؤقتة لكل مهمة (تُحذف تلقائياً)
-OUTPUT_DIR = DATA_DIR / "output"      # الفيديوهات النهائية
-SAMPLES_DIR = DATA_DIR / "samples"    # فيديوهات الأمثلة: <mode_id>.mp4
+WORK_DIR = DATA_DIR / "work"
+OUTPUT_DIR = DATA_DIR / "output"
+SAMPLES_DIR = DATA_DIR / "samples"
 DB_PATH = DATA_DIR / "genesis_db.json"
 ASSETS_DIR = BASE_DIR / "assets"
-FONTS_DIR = ASSETS_DIR / "fonts"      # ضع هنا خطاً عربياً مثل Cairo-Bold.ttf
-MUSIC_DIR = ASSETS_DIR / "music"      # اختياري: ملفات mp3 خلفية (بدون حقوق)
+FONTS_DIR = ASSETS_DIR / "fonts"
+MUSIC_DIR = ASSETS_DIR / "music"
 
-for _d in (DATA_DIR, WORK_DIR, OUTPUT_DIR, SAMPLES_DIR, FONTS_DIR, MUSIC_DIR):
-    _d.mkdir(parents=True, exist_ok=True)
+for _directory in (DATA_DIR, WORK_DIR, OUTPUT_DIR, SAMPLES_DIR, FONTS_DIR, MUSIC_DIR):
+    _directory.mkdir(parents=True, exist_ok=True)
+
 
 # ───────────────────────── تيليجرام ─────────────────────────
 try:
     API_ID = int(_first("API_ID", "TELEGRAM_API_ID") or 0)
-except ValueError:
+except (TypeError, ValueError):
     API_ID = 0
 API_HASH = _first("API_HASH", "TELEGRAM_API_HASH")
 BOT_TOKEN = _first("BOT_TOKEN", "TELEGRAM_BOT_TOKEN")
-ADMIN_IDS = {int(x) for x in _s("ADMIN_IDS").replace(" ", "").split(",") if x.isdigit()}
-# الوضع الخاص: عند تفعيله لا يستخدم البوت إلا المشرفون. يتفعّل تلقائياً إذا ضبطت ADMIN_IDS،
-# وللفتح للجميع ضع PRIVATE_MODE=0. (لا يُفعَّل أبداً بلا مشرفين حتى لا تُقفل على نفسك)
+
+_admin_ids_raw = _s("ADMIN_IDS").replace(" ", "")
+ADMIN_IDS = {int(item) for item in _admin_ids_raw.split(",") if item.isdigit()}
 PRIVATE_MODE = _b("PRIVATE_MODE", True) and bool(ADMIN_IDS)
 
+
 # ───────────────────────── المفاتيح المجانية ─────────────────────────
-# يدعم حتى مفتاحين لكل خدمة (حسابان): عند استنفاد الأول أو تحديد المعدل يتبدّل البوت للثاني تلقائياً.
-PIXABAY_KEYS = [k for k in dict.fromkeys(
-    [_first("PIXABAY_KEY", "PIXABAY_KEY_1"), _first("PIXABAY_KEY_2")]) if k]    # https://pixabay.com/api/docs/
-HF_TOKENS = [k for k in dict.fromkeys(
-    [_first("HF_TOKEN", "HF_TOKEN_1"), _first("HF_TOKEN_2")]) if k]             # https://huggingface.co/settings/tokens
+PIXABAY_KEYS = [
+    key for key in dict.fromkeys(
+        [_first("PIXABAY_KEY", "PIXABAY_KEY_1"), _first("PIXABAY_KEY_2")]
+    ) if key
+]
+HF_TOKENS = [
+    token for token in dict.fromkeys(
+        [_first("HF_TOKEN", "HF_TOKEN_1"), _first("HF_TOKEN_2")]
+    ) if token
+]
 PIXABAY_KEY = PIXABAY_KEYS[0] if PIXABAY_KEYS else ""
 HF_TOKEN = HF_TOKENS[0] if HF_TOKENS else ""
 
-# ───────────────────────── Supabase (اختياري — نسخ احتياطي للذاكرة) ─────────────────────────
-SUPABASE_URL = re.sub(r"/rest/v1/?$", "", _s("SUPABASE_URL").rstrip("/"))   # يتجاهل /rest/v1 إن أُضيف بالخطأ
+
+# ───────────────────────── Supabase (اختياري) ─────────────────────────
+SUPABASE_URL = re.sub(r"/rest/v1/?$", "", _s("SUPABASE_URL").rstrip("/"))
 SUPABASE_KEY = _first("SUPABASE_KEY", "SUPABASE_SECRET_KEY")
 SUPABASE_TABLE = _s("SUPABASE_TABLE", "genesis_state")
 
-# ───────────────────────── نماذج الذكاء الاصطناعي (قابلة للتغيير من .env) ─────────────────────────
+
+# ───────────────────────── نماذج الذكاء الاصطناعي ─────────────────────────
 HF_LLM_MODEL = _s("HF_LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
 HF_LLM_FALLBACK_MODEL = _s("HF_LLM_FALLBACK_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
 HF_IMAGE_MODEL = _s("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
 
+
 # ───────────────────────── الصوت ─────────────────────────
-TTS_FALLBACK_VOICES = ("ar-SA-HamedNeural", "ar-SA-ZariyahNeural", "ar-EG-ShakirNeural", "ar-EG-SalmaNeural")
+TTS_FALLBACK_VOICES = (
+    "ar-SA-HamedNeural",
+    "ar-SA-ZariyahNeural",
+    "ar-EG-ShakirNeural",
+    "ar-EG-SalmaNeural",
+)
+
 
 # ───────────────────────── الفيديو ─────────────────────────
 VIDEO_W, VIDEO_H = 1080, 1920
 FPS = _i("FPS", 30)
 X264_PRESET = _s("X264_PRESET", "veryfast")
 MIN_SCENES, MAX_SCENES = 5, 8
-SCENE_PAD = 0.35                      # ثوانٍ تُضاف بعد كل تعليق صوتي
+SCENE_PAD = 0.35
 SUBTITLES_ENABLED = _b("SUBTITLES", True)
-FONT_FAMILY = _s("FONT_FAMILY", "Cairo")   # اسم عائلة الخط داخل ملف الخط الذي وضعته في assets/fonts
+FONT_FAMILY = _s("FONT_FAMILY", "Cairo")
 SUB_FONT_SIZE = _i("SUB_FONT_SIZE", 78)
 MUSIC_VOLUME = _f("MUSIC_VOLUME", 0.10)
-MAX_FINAL_MB = _i("MAX_FINAL_MB", 48)  # حد رفع البوتات في تيليجرام = 50MB
+MAX_FINAL_MB = _i("MAX_FINAL_MB", 48)
+
 
 # ───────────────────────── حدود التشغيل ─────────────────────────
-DAILY_LIMIT = _i("DAILY_LIMIT", 5)               # فيديوهات/مستخدم/يوم (المشرفون بلا حد)
-MAX_CONCURRENT_JOBS = _i("MAX_CONCURRENT_JOBS", 1)
-MAX_RUN_MINUTES = _i("MAX_RUN_MINUTES", 0)       # >0: يوقف البوت بشكل منظم بعد هذه المدة (للمنصات ذات حد زمني)
-JOB_TIMEOUT = _i("JOB_TIMEOUT", 1200)            # ثوانٍ لكل فيديو
+DAILY_LIMIT = _i("DAILY_LIMIT", 5)
+MAX_CONCURRENT_JOBS = max(1, _i("MAX_CONCURRENT_JOBS", 1))
+MAX_RUN_MINUTES = _i("MAX_RUN_MINUTES", 0)
+JOB_TIMEOUT = _i("JOB_TIMEOUT", 1200)
 FFMPEG_TIMEOUT = _i("FFMPEG_TIMEOUT", 300)
-ASSET_CONCURRENCY = _i("ASSET_CONCURRENCY", 3)
-TZ_OFFSET_HOURS = _i("TZ_OFFSET_HOURS", 3)       # لحساب "اليوم" (3 = توقيت الجزيرة العربية)
+ASSET_CONCURRENCY = max(1, _i("ASSET_CONCURRENCY", 3))
+TZ_OFFSET_HOURS = _i("TZ_OFFSET_HOURS", 3)
 KEEP_WORK_FILES = _b("KEEP_WORK_FILES", False)
 OUTPUT_TTL_HOURS = _i("OUTPUT_TTL_HOURS", 24)
 MAX_IDEA_CHARS = 700
@@ -126,15 +142,17 @@ MIN_IDEA_CHARS = 8
 
 
 def missing_required() -> list[str]:
-    """المتغيرات الإلزامية الناقصة لتشغيل البوت."""
-    out = []
-    if not API_ID:
-        out.append("TELEGRAM_API_ID")
+    """يفحص الأسرار الأساسية قبل بدء البوت دون كشف قيمها في السجل."""
+    missing: list[str] = []
+    if API_ID <= 0:
+        missing.append("TELEGRAM_API_ID")
     if not API_HASH:
-        out.append("TELEGRAM_API_HASH")
+        missing.append("TELEGRAM_API_HASH")
     if not BOT_TOKEN:
-        out.append("TELEGRAM_BOT_TOKEN")
-    return out
+        missing.append("TELEGRAM_BOT_TOKEN")
+    elif ":" not in BOT_TOKEN:
+        missing.append("TELEGRAM_BOT_TOKEN (تنسيق الرمز غير صحيح)")
+    return missing
 
 
 # ═════════════════════════ الأوضاع الـ 17 ═════════════════════════
@@ -145,20 +163,19 @@ class Mode:
     name_ar: str
     name_en: str
     desc_ar: str
-    tone: str               # أسلوب السرد (يُمرَّر لوكيل السيناريو)
-    visual_style: str       # البصمة البصرية (تُضاف لكل برومبت صورة)
-    color_filter: str       # فلتر سينمائي لـ FFmpeg (تدرج لوني)
-    broll_ratio: float      # احتمال تفضيل لقطات الفيديو الحقيقية على الصور المولّدة (0..1)
-    stock_hints: tuple      # كلمات بحث احتياطية في Pixabay
-    sample_idea: str        # فكرة المثال التي تُستخدم لبناء فيديو العينة
+    tone: str
+    visual_style: str
+    color_filter: str
+    broll_ratio: float
+    stock_hints: tuple
+    sample_idea: str
     voice: str = "ar-SA-HamedNeural"
     voice_rate: str = "+0%"
-    motion: float = 0.12    # قوة حركة الكاميرا (Ken Burns) على الصور
+    motion: float = 0.12
 
 
-_M = Mode  # اختصار
-
-MODES: dict[str, Mode] = {m.id: m for m in (
+_M = Mode
+MODES: dict[str, Mode] = {mode.id: mode for mode in (
     _M("documentary", "🎥", "وثائقي سينمائي", "Cinematic documentary",
        "سرد وثائقي هادئ بأسلوب القنوات العالمية، حقائق وصور واقعية.",
        "calm, authoritative BBC-style documentary narration; vivid verified facts; dramatic pauses",
@@ -291,23 +308,17 @@ MODES: dict[str, Mode] = {m.id: m for m in (
 assert len(MODES) == 17, "يجب أن يكون عدد الأوضاع 17"
 MODE_ORDER = list(MODES.keys())
 
-# أزرار التجربة السريعة (تمر على خط الإنتاج الحقيقي كاملاً: سيناريو + صوت + لقطات + مونتاج)
 QUICK_DEMOS = [
-    ("🇾🇪 تجربة: اليمن السعيد", "travel",
-     "جمال الطبيعة والعمارة التاريخية في صنعاء القديمة وجزيرة سقطرى في اليمن"),
-    ("🥤 تجربة: المشروبات الغازية", "science",
-     "ماذا تفعل المشروبات الغازية بجسمك؟ حقائق علمية مبسّطة"),
-    ("⚽ تجربة: قصة لاعب", "sports",
-     "قصة لاعب كرة قدم صعد من حيّ فقير إلى نجومية العالم"),
+    ("🇾🇪 تجربة: اليمن السعيد", "travel", "جمال الطبيعة والعمارة التاريخية في صنعاء القديمة وجزيرة سقطرى في اليمن"),
+    ("🥤 تجربة: المشروبات الغازية", "science", "ماذا تفعل المشروبات الغازية بجسمك؟ حقائق علمية مبسّطة"),
+    ("⚽ تجربة: قصة لاعب", "sports", "قصة لاعب كرة قدم صعد من حيّ فقير إلى نجومية العالم"),
 ]
-assert all(m in MODES for _, m, _ in QUICK_DEMOS)
+assert all(mode_id in MODES for _, mode_id, _ in QUICK_DEMOS)
 
 
 # ═════════════════════════ القفل الجغرافي (Strict Geo-Lock) ═════════════════════════
-# (كلمات عربية للبحث في فكرة المستخدم, الاسم الإنجليزي للبرومبتات, وسوم يجب أن تظهر في وسوم Pixabay/Wikimedia)
-# المدن أولاً ثم الدول؛ يُختار أول موضع يظهر في نص المستخدم.
 GEO_LOCKS: list[tuple[tuple[str, ...], str, tuple[str, ...]]] = [
-    # مدن ومواقع
+    # المدن والمواقع
     (("صنعاء",), "Sanaa, Yemen", ("sanaa", "sana'a", "yemen")),
     (("عدن",), "Aden, Yemen", ("aden", "yemen")),
     (("حضرموت", "شبام"), "Hadramawt, Yemen", ("hadramawt", "hadhramaut", "shibam", "yemen")),
@@ -336,7 +347,7 @@ GEO_LOCKS: list[tuple[tuple[str, ...], str, tuple[str, ...]]] = [
     (("الخرطوم",), "Khartoum, Sudan", ("khartoum", "sudan")),
     (("اسطنبول", "استانبول"), "Istanbul, Turkey", ("istanbul", "turkey")),
     (("الاندلس", "غرناطه", "قرطبه", "اشبيليه"), "Andalusia, Spain", ("andalusia", "granada", "cordoba", "seville", "spain")),
-    # دول
+    # الدول
     (("اليمن", "يمن"), "Yemen", ("yemen",)),
     (("مصر",), "Egypt", ("egypt",)),
     (("السعوديه", "المملكه العربيه السعوديه"), "Saudi Arabia", ("saudi",)),
