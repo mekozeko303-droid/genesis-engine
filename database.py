@@ -101,11 +101,27 @@ class Database:
         return bool(config.SUPABASE_URL and config.SUPABASE_KEY)
 
     def _remote_headers(self) -> dict:
-        return {
-            "apikey": config.SUPABASE_KEY,
-            "Authorization": f"Bearer {config.SUPABASE_KEY}",
-            "Content-Type": "application/json",
-        }
+        h = {"apikey": config.SUPABASE_KEY, "Content-Type": "application/json"}
+        # المفاتيح الجديدة (sb_secret_...) ليست JWT: تُرسل في apikey فقط. القديمة (eyJ...) تُرسل في الاثنين.
+        if config.SUPABASE_KEY.startswith("eyJ"):
+            h["Authorization"] = f"Bearer {config.SUPABASE_KEY}"
+        return h
+
+    async def remote_check(self) -> tuple[bool, str]:
+        """فحص اتصال Supabase والجدول. يرجع (نجح؟، رسالة)."""
+        if not self._remote_enabled():
+            return False, "غير مفعّل (SUPABASE_URL أو SUPABASE_SECRET_KEY ناقص)"
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}",
+                                params={"select": "id", "limit": 1}, headers=self._remote_headers())
+        except Exception as e:
+            return False, f"تعذّر الوصول للرابط: {str(e)[:60]}"
+        if r.status_code == 200:
+            return True, "متصل والجدول موجود"
+        hint = {401: "المفتاح غير صحيح", 403: "المفتاح غير صحيح أو بلا صلاحية",
+                404: f"الجدول {config.SUPABASE_TABLE} غير موجود — نفّذ أمر SQL"}.get(r.status_code, r.text[:70])
+        return False, f"HTTP {r.status_code}: {hint}"
 
     async def _remote_pull(self) -> Optional[dict]:
         if not self._remote_enabled():
@@ -234,16 +250,19 @@ class Database:
 
     # ───────────────────────── فيديوهات الأمثلة ─────────────────────────
     def get_sample(self, mode_id: str) -> Optional[dict]:
-        """يرجع {"file_id":..., "path":...} أو None. الأولوية لملف يضعه المالك يدوياً في data/samples."""
-        manual = config.SAMPLES_DIR / f"{mode_id}.mp4"
+        """يرجع {"file_id":..., "path":...} أو None.
+        الأولوية: (1) فيديو ثبّته المشرف يدوياً (file_id) ← (2) ملف data/samples/<mode>.mp4 ← (3) آخر مثال مبني."""
         rec = self.data["samples"].get(mode_id, {})
         file_id = rec.get("file_id")
+        if rec.get("pinned") and file_id:
+            return {"file_id": file_id, "path": None}
+        manual = config.SAMPLES_DIR / f"{mode_id}.mp4"
         if manual.exists() and manual.stat().st_size > 1024:
             return {"file_id": file_id if rec.get("path") == str(manual) else None, "path": str(manual)}
         if file_id:
             return {"file_id": file_id, "path": None}
         return None
 
-    async def set_sample(self, mode_id: str, path: Optional[str], file_id: Optional[str]) -> None:
-        self.data["samples"][mode_id] = {"path": path, "file_id": file_id, "ts": int(time.time())}
+    async def set_sample(self, mode_id: str, path: Optional[str], file_id: Optional[str], pinned: bool = False) -> None:
+        self.data["samples"][mode_id] = {"path": path, "file_id": file_id, "pinned": pinned, "ts": int(time.time())}
         await self.save(remote=True)
