@@ -8,19 +8,13 @@ Genesis Cinema Studio — main.py
 import asyncio
 
 # توافق مع Python 3.12+ (Pyrogram يطلب حلقة أحداث عند الاستيراد)
-import warnings
-
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", DeprecationWarning)
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 import logging
-import os
 import shutil
-import signal
 import sys
 import time
 
@@ -47,8 +41,6 @@ ACTIVE_USERS: set[int] = set()          # مستخدم واحد = فيديو و�
 QUEUE: list[int] = []                   # ترتيب الانتظار
 BG_TASKS: set[asyncio.Task] = set()     # مراجع قوية للمهام الخلفية
 STARTUP_WARNINGS: list[str] = []
-AWAITING_SAMPLE: dict[int, str] = {}   # مشرف → وضع ينتظر فيديو مثال منه
-SHUTTING_DOWN = False                   # عند True: لا نقبل فيديوهات جديدة
 
 A_RECEPTION = "🛎 وكيل الاستقبال"
 A_WRITER = "✍️ وكيل السيناريو"
@@ -84,33 +76,6 @@ def modes_keyboard() -> InlineKeyboardMarkup:
     if row:
         rows.append(row)
     return InlineKeyboardMarkup(rows)
-
-
-def welcome_keyboard() -> InlineKeyboardMarkup:
-    """أزرار التجربة السريعة أولاً ثم الأوضاع الـ 17."""
-    rows = [[InlineKeyboardButton(label, callback_data=f"quick:{i}")] for i, (label, _, _) in enumerate(config.QUICK_DEMOS)]
-    return InlineKeyboardMarkup(rows + modes_keyboard().inline_keyboard)
-
-
-def mode_card_markup(uid: int, mode_id: str):
-    if not is_admin(uid):
-        return None
-    return InlineKeyboardMarkup([[InlineKeyboardButton("📌 تثبيت فيديو مثال لهذا الوضع", callback_data=f"pin:{mode_id}")]])
-
-
-async def ensure_allowed(update) -> bool:
-    """قفل الوضع الخاص: يمنع غير المشرفين (أمر /id وحده يبقى متاحاً ليعرف المالك رقمه)."""
-    uid = update.from_user.id
-    if not config.PRIVATE_MODE or is_admin(uid):
-        return True
-    try:
-        if isinstance(update, CallbackQuery):
-            await update.answer("⛔ هذا البوت خاص بمالكه", show_alert=True)
-        else:
-            await update.reply_text(f"⛔ هذا البوت خاص بمالكه فقط.\nرقمك: {uid}", parse_mode=PM)
-    except Exception:
-        pass
-    return False
 
 
 def after_keyboard() -> InlineKeyboardMarkup:
@@ -172,29 +137,11 @@ class ProgressReporter:
             pass  # التقدّم غير حرج
 
 
-async def send_final_video(client: Client, chat_id: int, r: ProductionResult, caption: str):
-    """يرفع الفيديو كاملاً (مدة/أبعاد/صورة مصغّرة)، وإن فشل لأي سبب يعيد بصيغة مبسّطة."""
-    async def full():
-        return await client.send_video(
-            chat_id, str(r.video_path), caption=caption, parse_mode=PM, duration=int(r.duration),
-            width=r.width, height=r.height, thumb=str(r.thumb_path) if r.thumb_path else None,
-            supports_streaming=True)
-
-    async def minimal():
-        return await client.send_video(chat_id, str(r.video_path), caption=caption, parse_mode=PM)
-
-    try:
-        return await retry_flood(full)
-    except Exception as e:
-        log.warning("الرفع الكامل فشل (%s) → محاولة مبسّطة", str(e)[:100])
-        return await retry_flood(minimal)
-
-
 def make_caption(r: ProductionResult) -> str:
     return f"🎬 {r.title}\n\n{' '.join(r.hashtags)}"[:1000]
 
 
-async def send_mode_card(client: Client, chat_id: int, mode: config.Mode, markup=None) -> None:
+async def send_mode_card(client: Client, chat_id: int, mode: config.Mode) -> None:
     text = (f"{mode.emoji} وضع «{mode.name_ar}»\n{mode.desc_ar}\n\n"
             f"✍️ أرسل الآن فكرة الفيديو.\nمثال: {mode.sample_idea}")
     sample = db.get_sample(mode.id)
@@ -203,12 +150,11 @@ async def send_mode_card(client: Client, chat_id: int, mode: config.Mode, markup
             if not src:
                 continue
             try:
-                await client.send_video(chat_id, src, caption=text, parse_mode=PM, supports_streaming=True,
-                                        reply_markup=markup)
+                await client.send_video(chat_id, src, caption=text, parse_mode=PM, supports_streaming=True)
                 return
             except Exception as e:
                 log.warning("تعذّر إرسال مثال %s: %s", mode.id, str(e)[:100])
-    await client.send_message(chat_id, text, parse_mode=PM, reply_markup=markup)
+    await client.send_message(chat_id, text, parse_mode=PM)
 
 
 # ═════════════════════════ دورة إنتاج فيديو ═════════════════════════
@@ -226,7 +172,10 @@ async def run_job(client: Client, chat_id: int, uid: int, idea: str, mode_id: st
             result = await asyncio.wait_for(engine.produce(idea, mode_id, progress=rep), timeout=config.JOB_TIMEOUT)
 
         await rep("upload")
-        sent = await send_final_video(client, chat_id, result, make_caption(result))
+        sent = await retry_flood(lambda: client.send_video(
+            chat_id, str(result.video_path), caption=make_caption(result), parse_mode=PM,
+            duration=int(result.duration), width=result.width, height=result.height,
+            thumb=str(result.thumb_path) if result.thumb_path else None, supports_streaming=True))
         await db.record_success(uid, mode_id, idea, result.title, result.used_assets)
 
         left = db.remaining_quota(uid, is_admin(uid))
@@ -272,9 +221,6 @@ async def try_start(client: Client, chat_id: int, uid: int, name: str, idea: str
         await client.send_message(chat_id, f"{A_RECEPTION}: اختر وضع الإنتاج أولاً، وسأبدأ بفكرتك مباشرة 👇",
                                   reply_markup=modes_keyboard(), parse_mode=PM)
         return
-    if SHUTTING_DOWN:
-        await client.send_message(chat_id, "🔄 البوت يعيد تشغيل نفسه (دقيقتان تقريباً). أرسل فكرتك بعد قليل.", parse_mode=PM)
-        return
     if uid in ACTIVE_USERS:
         await client.send_message(chat_id, "⏳ لديك فيديو قيد الإنتاج الآن. انتظر حتى يصلك.", parse_mode=PM)
         return
@@ -290,46 +236,26 @@ async def try_start(client: Client, chat_id: int, uid: int, name: str, idea: str
 # ═════════════════════════ المعالجات ═════════════════════════
 @app.on_message(filters.private & filters.command(["start", "help", "modes"]))
 async def cmd_start(client: Client, message: Message):
-    if not await ensure_allowed(message):
-        return
     db.user(message.from_user.id)
     if message.command[0] == "modes":
         await message.reply_text("اختر وضع الإنتاج 👇", reply_markup=modes_keyboard(), parse_mode=PM)
     else:
-        await message.reply_text(WELCOME, reply_markup=welcome_keyboard(), parse_mode=PM)
+        await message.reply_text(WELCOME, reply_markup=modes_keyboard(), parse_mode=PM)
 
 
 @app.on_callback_query()
 async def on_callback(client: Client, cq: CallbackQuery):
     uid, data = cq.from_user.id, cq.data or ""
     chat_id = cq.message.chat.id
-    if not await ensure_allowed(cq):
-        return
     try:
-        if data.startswith("quick:"):
-            idx = int(data[6:])
-            label, mode_id, idea = config.QUICK_DEMOS[idx]
-            await cq.answer("🎬 بدأ الإنتاج")
-            await db.set_mode(uid, mode_id, cq.from_user.first_name or "")
-            await try_start(client, chat_id, uid, cq.from_user.first_name or "", idea)
-        elif data.startswith("pin:"):
-            mode = config.MODES.get(data[4:])
-            if not is_admin(uid) or not mode:
-                await cq.answer("للمشرف فقط", show_alert=True)
-                return
-            AWAITING_SAMPLE[uid] = mode.id
-            await cq.answer()
-            await client.send_message(
-                chat_id, f"📌 أرسل الآن فيديو المثال لوضع «{mode.name_ar}» (من جهازك، مثلاً مقطع Higgsfield أو CapCut).\n"
-                         "يُحفظ ولا يُمسح عند إعادة التشغيل.", parse_mode=PM)
-        elif data.startswith("mode:"):
+        if data.startswith("mode:"):
             mode = config.MODES.get(data[5:])
             if not mode:
                 await cq.answer("وضع غير معروف", show_alert=True)
                 return
             await db.set_mode(uid, mode.id, cq.from_user.first_name or "")
             await cq.answer(f"✅ {mode.name_ar}")
-            await send_mode_card(client, chat_id, mode, mode_card_markup(uid, mode.id))
+            await send_mode_card(client, chat_id, mode)
             pending = await db.pop_pending(uid)
             if pending:
                 await try_start(client, chat_id, uid, cq.from_user.first_name or "", pending)
@@ -345,43 +271,6 @@ async def on_callback(client: Client, cq: CallbackQuery):
         await asyncio.sleep(min(int(e.value), 10))
     except Exception:
         log.exception("خطأ في معالج الأزرار")
-
-
-@app.on_message(filters.private & filters.command("id"))
-async def cmd_id(client: Client, message: Message):
-    """يعرض رقمك الرقمي — هذا هو الذي تضعه في ADMIN_IDS."""
-    uid = message.from_user.id
-    note = "✅ أنت مشرف." if is_admin(uid) else "ضع هذا الرقم في سرّ ADMIN_IDS ثم أعد تشغيل البوت."
-    await message.reply_text(f"🆔 رقمك: {uid}\n{note}", parse_mode=PM)
-
-
-async def run_check() -> str:
-    lines = await engine.diagnose()
-    lock = f"🔒 الوضع الخاص: مفعّل ({len(config.ADMIN_IDS)} مشرف)" if config.PRIVATE_MODE else (
-        "🔓 الوضع الخاص: مغلق — البوت مفتوح للجميع" + ("" if config.ADMIN_IDS else " (ADMIN_IDS غير مضبوط)"))
-    return "🩺 فحص النظام:\n" + "\n".join(lines + [lock])
-
-
-@app.on_message(filters.private & filters.command("check"))
-async def cmd_check(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        await message.reply_text("هذا الأمر للمشرف فقط. أرسل /id لمعرفة رقمك وضعه في ADMIN_IDS.", parse_mode=PM)
-        return
-    wait = await message.reply_text("🩺 جاري فحص الخدمات...", parse_mode=PM)
-    await wait.edit_text(await run_check(), parse_mode=PM)
-
-
-async def startup_report(client: Client) -> None:
-    """يرسل للمشرفين تقرير فحص عند كل تشغيل (يصل فقط لمن سبق أن ضغط Start مع البوت)."""
-    try:
-        text = "✅ Genesis Cinema Studio يعمل\n\n" + await run_check()
-    except Exception as e:
-        text = f"✅ البوت يعمل، لكن الفحص فشل: {str(e)[:100]}"
-    for admin in config.ADMIN_IDS:
-        try:
-            await client.send_message(admin, text, parse_mode=PM)
-        except Exception as e:
-            log.warning("تعذّر إرسال تقرير التشغيل للمشرف %s: %s (اضغط Start مع البوت أولاً)", admin, str(e)[:80])
 
 
 @app.on_message(filters.private & filters.command("stats"))
@@ -428,13 +317,11 @@ async def build_samples(client: Client, chat_id: int, targets: list[str]) -> Non
     await client.send_message(chat_id, "✅ انتهى بناء الأمثلة.", parse_mode=PM)
 
 
-_COMMANDS = ["start", "help", "modes", "stats", "samples", "check", "id"]
+_COMMANDS = ["start", "help", "modes", "stats", "samples"]
 
 
 @app.on_message(filters.private & filters.text & ~filters.command(_COMMANDS))
 async def on_idea(client: Client, message: Message):
-    if not await ensure_allowed(message):
-        return
     idea = (message.text or "").strip()
     uid = message.from_user.id
     if len(idea) < config.MIN_IDEA_CHARS:
@@ -445,41 +332,12 @@ async def on_idea(client: Client, message: Message):
     await try_start(client, message.chat.id, uid, message.from_user.first_name or "", idea)
 
 
-@app.on_message(filters.private & filters.video)
-async def on_video(client: Client, message: Message):
-    """فيديو من المشرف بعد زر «تثبيت فيديو مثال» ← يُحفظ file_id دائماً (ويُنسخ احتياطياً في Supabase)."""
-    uid = message.from_user.id
-    if not await ensure_allowed(message):
-        return
-    mode_id = AWAITING_SAMPLE.pop(uid, None) if is_admin(uid) else None
-    if not mode_id:
-        await message.reply_text("أرسل فكرة الفيديو كنص من فضلك ✍️", parse_mode=PM)
-        return
-    await db.set_sample(mode_id, None, message.video.file_id, pinned=True)
-    mode = config.MODES[mode_id]
-    await message.reply_text(f"✅ تم تثبيت هذا الفيديو كمثال دائم لوضع «{mode.name_ar}».", parse_mode=PM)
-
-
-@app.on_message(filters.private & ~filters.text & ~filters.video & ~filters.service)
+@app.on_message(filters.private & ~filters.text & ~filters.service)
 async def on_other(client: Client, message: Message):
-    if not await ensure_allowed(message):
-        return
     await message.reply_text("أرسل فكرة الفيديو كنص من فضلك ✍️", parse_mode=PM)
 
 
 # ═════════════════════════ التشغيل ═════════════════════════
-async def auto_stop() -> None:
-    """بعد MAX_RUN_MINUTES: يمنع الطلبات الجديدة، ينتظر الفيديوهات الجارية (حتى 6 دقائق)، ثم يوقف البوت بسلام."""
-    global SHUTTING_DOWN
-    await asyncio.sleep(config.MAX_RUN_MINUTES * 60)
-    SHUTTING_DOWN = True
-    log.info("⏰ انتهت مدة التشغيل المحددة — إيقاف منظم")
-    deadline = time.monotonic() + 360
-    while (ACTIVE_USERS or JOB_SEM.locked()) and time.monotonic() < deadline:
-        await asyncio.sleep(5)
-    os.kill(os.getpid(), signal.SIGINT)   # يُنهي idle() فيُحفظ كل شيء ويخرج البرنامج
-
-
 async def amain() -> None:
     await db.load()
     fatal, warn = await engine.start()
@@ -494,9 +352,6 @@ async def amain() -> None:
     async with app:
         me = await app.get_me()
         log.info("✅ Genesis Cinema Studio يعمل: @%s", me.username)
-        spawn(startup_report(app))
-        if config.MAX_RUN_MINUTES > 0:
-            spawn(auto_stop())
         await idle()
     await engine.close()
     await db.flush()
@@ -505,6 +360,6 @@ async def amain() -> None:
 if __name__ == "__main__":
     missing = config.missing_required()
     if missing:
-        print("❌ أسرار ناقصة (أضفها في GitHub: Settings ← Secrets and variables ← Actions): " + ", ".join(missing))
+        print("❌ متغيرات ناقصة في .env: " + ", ".join(missing))
         sys.exit(1)
     app.run(amain())
