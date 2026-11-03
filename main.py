@@ -439,6 +439,12 @@ async def on_idea(client: Client, message: Message):
 
 # ═════════════════════════ التشغيل المضمون ═════════════════════════
 async def amain() -> None:
+    # توحيد حلقة الأحداث مع Pyrogram في Python 3.12 لضمان استلام الرسائل فوراً
+    running_loop = asyncio.get_running_loop()
+    app.loop = running_loop
+    if hasattr(app, "dispatcher") and app.dispatcher:
+        app.dispatcher.loop = running_loop
+
     await db.load()
     fatal, warn = await engine.start()
     STARTUP_WARNINGS.extend(warn)
@@ -461,6 +467,19 @@ async def amain() -> None:
 
     me = await app.get_me()
     log.info("✅ Genesis Cinema Studio يعمل بنجاح: @%s", me.username)
+
+    # إرسال إشعار فوري لك في تيليجرام بمجرد إقلاع البوت
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await app.send_message(
+                admin_id,
+                "🟢 البوت متصل وشغال الآن 100%! اختر الوضع أو المدة وابدأ الإنتاج 👇",
+                reply_markup=modes_keyboard(admin_id),
+                parse_mode=PM,
+            )
+        except Exception as e:
+            log.warning("تعذر إرسال إشعار البدء للمشرف %s: %s", admin_id, e)
+
     await idle()
     await app.stop()
     await engine.close()
@@ -472,8 +491,8 @@ if __name__ == "__main__":
     if missing:
         print("❌ متغيرات ناقصة في Secrets: " + ", ".join(missing))
         sys.exit(1)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # استخدام نفس حلقة الأحداث التي تم تعريفها في أعلى الملف دون إنشاء حلقة جديدة
+    loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(amain())
     except KeyboardInterrupt:
