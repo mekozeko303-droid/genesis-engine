@@ -3,12 +3,12 @@ name: Genesis Cinema Studio
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
   schedule:
-    - cron: "*/30 * * * *"   # شبكة أمان: إن انتهت الجلسة السابقة تبدأ التالية فوراً
+    - cron: "*/30 * * * *"
 
-# تشغيل واحد فقط في كل وقت (نفس التوكن لا يجوز أن يعمل مرتين).
-# push/تشغيل يدوي = يوقف القديم ويبدأ بالكود الجديد، أما الـ schedule فينتظر دوره.
+# لا تشغّل نسختين من البوت بالتوكن نفسه في الوقت ذاته.
 concurrency:
   group: genesis-bot
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
@@ -18,23 +18,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-      - uses: actions/checkout@v4
+      - name: تنزيل المستودع
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: إعداد Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements.txt
 
-      - name: FFmpeg + خط عربي
+      - name: تثبيت FFmpeg والخط العربي
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg fonts-noto-core
 
-      - name: تثبيت المكتبات
-        run: pip install -r requirements.txt
+      - name: تثبيت مكتبات Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: فحص الملفات والأسرار الأساسية
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          python - <<'PY'
+          import config
+          missing = config.missing_required()
+          if missing:
+              raise SystemExit("Missing/invalid required GitHub Secrets: " + ", ".join(missing))
+          print("Configuration checks passed. Secret values are not printed.")
+          PY
 
       - name: تشغيل البوت
-        run: python main.py
         env:
           PYTHONUNBUFFERED: "1"
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -49,4 +67,5 @@ jobs:
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
           FONT_FAMILY: "Noto Sans Arabic"
           MAX_RUN_MINUTES: "335"
-          PRIVATE_MODE: "1"   # 1 = للمشرفين فقط (ADMIN_IDS)، ضع 0 لفتح البوت للجميع
+          PRIVATE_MODE: "1"
+        run: python main.py
