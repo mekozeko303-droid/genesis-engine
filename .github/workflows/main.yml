@@ -7,6 +7,8 @@ on:
   schedule:
     - cron: "*/30 * * * *"   # شبكة أمان: إن انتهت الجلسة السابقة تبدأ التالية فوراً
 
+# تشغيل واحد فقط في كل وقت (نفس التوكن لا يجوز أن يعمل مرتين).
+# push/تشغيل يدوي = يوقف القديم ويبدأ بالكود الجديد، أما الـ schedule فينتظر دوره.
 concurrency:
   group: genesis-bot
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
@@ -47,3 +49,4 @@ jobs:
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
           FONT_FAMILY: "Noto Sans Arabic"
           MAX_RUN_MINUTES: "335"
+          PRIVATE_MODE: "1"   # 1 = للمشرفين فقط (ADMIN_IDS)، ضع 0 لفتح البوت للجميع
