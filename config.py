@@ -25,33 +25,26 @@ API_ID = int(_env(["TELEGRAM_API_ID", "API_ID"], "31270154"))
 API_HASH = _env(["TELEGRAM_API_HASH", "API_HASH"], "")
 BOT_TOKEN = _env(["TELEGRAM_BOT_TOKEN", "BOT_TOKEN"], "")
 
-# قفل المشرف (حسابك الشخصي في تيليجرام)
 _raw_admins = _env(["ADMIN_IDS", "ADMIN_ID"], "9165452838")
 ADMIN_IDS: set[int] = {int(x.strip()) for x in _raw_admins.split(",") if x.strip().isdigit()}
 
 HF_TOKEN = _env(["HF_TOKEN", "HUGGINGFACE_TOKEN"], "")
 PIXABAY_API_KEY = _env(["PIXABAY_API_KEY", "PIXABAY_KEY"], "")
-GEMINI_API_KEY = _env(["GEMINI_KEY_1", "GEMINI_API_KEY"], "")
-
 SUPABASE_URL = _env(["SUPABASE_URL"], "")
 SUPABASE_KEY = _env(["SUPABASE_SECRET_KEY", "SUPABASE_KEY", "SUPABASE_PUB_KEY"], "")
 
-KAGGLE_USER_1 = _env(["KAGGLE_USER_1"], "")
-KAGGLE_KEY_1 = _env(["KAGGLE_KEY_1"], "")
-
 MAX_CONCURRENT_JOBS = 2
-JOB_TIMEOUT = 1800  # 30 دقيقة لدعم الفيديوهات الطويلة حتى 10 دقائق
+JOB_TIMEOUT = 1800
 DAILY_LIMIT = 20
 MIN_IDEA_CHARS = 4
 MAX_IDEA_CHARS = 4000
 
-# خيارات المدة التي يحددها المستخدم
 DURATIONS = {
     30: "⏱ 30 ثانية (شورتس خاطف)",
     60: "⏱ 1 دقيقة (ريلز قياسي)",
     180: "⏱ 3 دقائق (قصة كاملة)",
     300: "⏱ 5 دقائق (تقرير مفصل)",
-    600: "⏱ 10 دقائق (فيلم / حلقة كاملة)",
+    600: "⏱ 10 دقائق (حلقة كاملة)",
 }
 
 
@@ -60,7 +53,7 @@ class Mode:
     id: str
     name_ar: str
     emoji: str
-    engine: str          # ai_character | ai_anime | ai_2d | hybrid_video | stock_video
+    engine: str
     voice: str
     voice_rate: str
     vfilter: str
@@ -71,30 +64,30 @@ class Mode:
 
 
 MODES: dict[str, Mode] = {
-    "fasso": Mode(
-        id="fasso",
-        name_ar="فصوع والدراما العراقية 3D",
+    "drama_3d": Mode(
+        id="drama_3d",
+        name_ar="الدراما الشعبية المجسمة 3D",
         emoji="🐃",
         engine="ai_character",
         voice="ar-IQ-BasselNeural",
         voice_rate="-2%",
         vfilter="eq=contrast=1.18:saturation=1.12",
-        style_en="3D anthropomorphic animal character wearing dusty traditional Iraqi work clothes in a mud-brick Middle Eastern alley, crying expressive eyes, cinematic Unreal Engine 5 render, hyper-realistic textures",
+        style_en="3D anthropomorphic character wearing traditional Middle Eastern work clothes in a dusty alley, crying expressive eyes, cinematic Unreal Engine 5 render",
         pixabay_q="desert village alley dramatic",
-        desc_ar="قصص درامية وشعبية مجسمة 3D على غرار شخصيات فصوع باللهجة العراقية المعبرة.",
-        sample_idea="فصوع يركض في الحارة الشعبية ويبكي على صديقه وسط نظرات الجميع"
+        desc_ar="قصص درامية وشعبية بأسلوب مجسم 3D تعبيري باللهجة العراقية والعربية المؤثرة.",
+        sample_idea="شخصية شعبية تبكي بحرقة على صديقها في حارة قديمة"
     ),
     "cinematic": Mode(
         id="cinematic",
-        name_ar="الأفلام السينمائية",
+        name_ar="الأفلام السينمائية الواقعية",
         emoji="🎬",
         engine="ai_character",
         voice="ar-SA-HamedNeural",
         voice_rate="-4%",
         vfilter="eq=contrast=1.20:saturation=1.10",
-        style_en="Hollywood IMAX 70mm photorealistic movie frame, expressive real human actors, dramatic anamorphic lighting, 35mm lens, shallow depth of field",
+        style_en="Hollywood IMAX 70mm photorealistic movie frame, real human actors, dramatic anamorphic lighting, 35mm lens",
         pixabay_q="cinematic city night rain",
-        desc_ar="إنتاج سينمائي واقعي بهوليوود ستايل مع ثبات ملامح الشخصيات وإضاءة درامية.",
+        desc_ar="مشاهد درامية واقعية بهوليوود ستايل مع ملامح بشرية حقيقية ودقة فائقة.",
         sample_idea="محقق يمشي تحت المطر في شوارع مظلمة ويكتشف سراً خطيراً"
     ),
     "kids": Mode(
@@ -105,48 +98,48 @@ MODES: dict[str, Mode] = {
         voice="ar-SA-ZariyahNeural",
         voice_rate="+2%",
         vfilter="eq=saturation=1.38:contrast=1.08",
-        style_en="Cute Disney Pixar 3D animated movie frame, adorable expressive 3D cartoon character, soft subsurface scattering, joyful bright colors, 8k render",
+        style_en="Cute Disney Pixar 3D animated movie frame, adorable expressive 3D cartoon character, joyful bright colors, 8k render",
         pixabay_q="cartoon 3d animation colorful",
-        desc_ar="أفلام كرتون ثلاثية الأبعاد بأسلوب بيكسار وديزني بشخصيات محبوبة وألوان زاهية.",
-        sample_idea="طفل موهوب يسجل هدف الفوز في الدقيقة الأخيرة وسط فرحة أصدقائه"
+        desc_ar="أفلام كرتون ثلاثية الأبعاد بأسلوب ديزني وبيكسار بألوان زاهية ومبهجة.",
+        sample_idea="طفل موهوب يسجل هدف الفوز في الدقيقة الأخيرة وسط أصدقائه"
     ),
     "anime": Mode(
         id="anime",
-        name_ar="الأنمي الياباني",
+        name_ar="الأنمي والمانجا اليابانية",
         emoji="🌸",
         engine="ai_anime",
         voice="ar-SA-HamedNeural",
         voice_rate="+0%",
         vfilter="eq=saturation=1.35:contrast=1.12",
-        style_en="Masterpiece Japanese Anime frame, Studio Ghibli and Makoto Shinkai style, vibrant hand-painted cel shading, dramatic sunset clouds, expressive anime character",
+        style_en="Masterpiece Japanese Anime frame, Studio Ghibli and Makoto Shinkai style, vibrant cel shading, sunset clouds",
         pixabay_q="anime landscape sunset clouds",
-        desc_ar="رسوم وتحريك بأسلوب الأنمي الياباني الدافئ واستوديو جيبلي.",
+        desc_ar="تحريك ورسم بأسلوب الأنمي الياباني الدافئ واستوديو جيبلي.",
         sample_idea="محارب ساموراي شاب يقف فوق قمة جبلية لحماية قريته عند الغروب"
     ),
     "minecraft": Mode(
         id="minecraft",
-        name_ar="عالم ماين كرافت 3D",
+        name_ar="عالم ماين كرافت المكعب 3D",
         emoji="🟩",
         engine="ai_character",
         voice="ar-SA-HamedNeural",
         voice_rate="+4%",
         vfilter="eq=saturation=1.32:contrast=1.15",
-        style_en="Minecraft 3D Voxel video game animation style, iconic blocky cubic characters (Steve style square head and body), voxel world made of blocks, Unreal Engine 5 shaders",
+        style_en="Minecraft 3D Voxel video game animation style, iconic blocky cubic characters, voxel world made of blocks",
         pixabay_q="blocks pixel game 3d",
         desc_ar="مغامرات ومباريات حماسية بشخصيات وعالم ماين كرافت المكعب ثلاثي الأبعاد.",
         sample_idea="مباراة كرة قدم حماسية بشخصيات ماين كرافت في ملعب عملاق"
     ),
     "stickman": Mode(
         id="stickman",
-        name_ar="الستيك مان الفيروسي",
+        name_ar="الستيك مان الفيروسي (2D)",
         emoji="🖍️",
         engine="ai_2d",
         voice="ar-EG-ShakirNeural",
         voice_rate="+6%",
         vfilter="eq=contrast=1.25:saturation=1.30",
-        style_en="Clean 2D viral stickman cartoon animation style, black stick figure body, round white filled head with expressive cartoon face, clean colorful flat vector background",
+        style_en="Clean 2D viral stickman cartoon animation style, black stick figure body, round white head, colorful vector background",
         pixabay_q="sketch drawing cartoon",
-        desc_ar="رسوم ستيك مان 2D الشهيرة للشروحات والقصص الفيروسية السريعة.",
+        desc_ar="رسوم ستيك مان 2D الشهيرة للقصص والشروحات السريعة.",
         sample_idea="كيف تبني عادات النجاح وتتخلص من الكسل بأسلوب ستيك مان"
     ),
     "yemen_doc": Mode(
@@ -157,10 +150,23 @@ MODES: dict[str, Mode] = {
         voice="ar-YE-SalehNeural",
         voice_rate="-2%",
         vfilter="eq=contrast=1.16:saturation=1.18",
-        style_en="National Geographic 8K documentary photography of Yemen, Old City of Sanaa tower houses, Socotra dragon blood trees, green mountains of Ibb and Taiz, golden hour",
+        style_en="National Geographic 8K documentary photography of Yemen, Old City of Sanaa, Socotra trees, green mountains",
         pixabay_q="mountains ancient castle architecture clouds",
         desc_ar="وثائقيات مخصصة لتاريخ وجمال ومعالم اليمن السعيد والحضارات العريقة بصوت يمني أصيل.",
         sample_idea="جمال الطبيعة الساحرة والعمارة التاريخية في اليمن وصنعاء وسقطرى"
+    ),
+    "cloning": Mode(
+        id="cloning",
+        name_ar="استنساخ الوجه وترميم الفيديو",
+        emoji="🧬",
+        engine="kaggle_face",
+        voice="ar-SA-HamedNeural",
+        voice_rate="+0%",
+        vfilter="eq=contrast=1.12:saturation=1.15",
+        style_en="Ultra-detailed photorealistic human portrait, biometric hologram scanning, crystal clear skin texture",
+        pixabay_q="technology digital face artificial intelligence",
+        desc_ar="أرسل أي فيديو هنا ليقوم الوكيل بمعالجته، إزالة العلامات المائية، وترميم جودة الملامح.",
+        sample_idea="أرسل فيديو من جهازك لمعالجته وترميمه"
     ),
     "explainer": Mode(
         id="explainer",
@@ -170,7 +176,7 @@ MODES: dict[str, Mode] = {
         voice="ar-EG-ShakirNeural",
         voice_rate="+4%",
         vfilter="eq=contrast=1.15:saturation=1.22",
-        style_en="Clean modern 3D educational & medical explainer visualization, high detail macro photography mixed with clear infographic visual storytelling",
+        style_en="Clean modern 3D educational & medical explainer visualization, macro photography mixed with clear infographic",
         pixabay_q="science health sport fitness",
         desc_ar="فيديوهات تعليمية وصحية ورياضية تجمع اللقطات الحقيقية والرسوم التوضيحية.",
         sample_idea="فوائد ممارسة كرة القدم للصحة الجسدية والنفسية والاجتماعية"
@@ -196,7 +202,7 @@ MODES: dict[str, Mode] = {
         voice="ar-EG-ShakirNeural",
         voice_rate="+0%",
         vfilter="eq=contrast=1.12:saturation=1.14",
-        style_en="Cinematic movie dialogue frame, two expressive characters conversing in a warm atmospheric setting, 50mm portrait lens",
+        style_en="Cinematic movie dialogue frame, two expressive characters conversing in a warm atmospheric setting",
         pixabay_q="people talking coffee shop",
         desc_ar="مشاهد حوارية تمثيلية بين الشخصيات بأداء صوتي معبر.",
         sample_idea="حوار ملهم بين حكيم وشاب يبحث عن سر النجاح"
@@ -235,10 +241,10 @@ MODES: dict[str, Mode] = {
         voice="ar-SA-ZariyahNeural",
         voice_rate="+5%",
         vfilter="eq=contrast=1.15:saturation=1.25",
-        style_en="First-person POV realistic handheld camera walking inside an iconic fantasy/cartoon world in real life, hyper-realistic 9:16 vertical",
+        style_en="First-person POV realistic handheld camera walking inside an iconic fantasy world, hyper-realistic 9:16 vertical",
         pixabay_q="tropical walk pov waterfall",
-        desc_ar="فيديوهات منظور الشخص الأول (POV) للدخول إلى العوالم الكرتونية والواقعية.",
-        sample_idea="جولة من منظور الشخص الأول داخل بيت سبونج بوب في الواقع"
+        desc_ar="فيديوهات منظور الشخص الأول (POV) للدخول إلى العوالم الخيالية والواقعية.",
+        sample_idea="جولة من منظور الشخص الأول داخل بيت سحري في الغابة"
     ),
     "ads": Mode(
         id="ads",
@@ -274,7 +280,7 @@ MODES: dict[str, Mode] = {
         voice="ar-SA-ZariyahNeural",
         voice_rate="-8%",
         vfilter="eq=saturation=1.15",
-        style_en="Cozy atmospheric cabin with warm fireplace glow while rain falls on glass window at night, peaceful lo-fi mood",
+        style_en="Cozy atmospheric cabin with warm fireplace glow while rain falls on glass window at night",
         pixabay_q="rain window fireplace night",
         desc_ar="فيديوهات هادئة ومريحة للأعصاب مع سرد تأملي دافئ.",
         sample_idea="أمسية هادئة تحت صوت المطر للتأمل والراحة النفسية"
@@ -287,7 +293,7 @@ MODES: dict[str, Mode] = {
         voice="ar-SA-HamedNeural",
         voice_rate="-2%",
         vfilter="eq=contrast=1.16:saturation=1.08",
-        style_en="Professional dark moody podcast studio, close-up Shure SM7B microphone, warm neon sign, cinematic depth of field",
+        style_en="Professional dark moody podcast studio, close-up Shure SM7B microphone, warm neon sign",
         pixabay_q="microphone podcast studio",
         desc_ar="مقاطع بودكاست مرئية بصوت إذاعي فخم وإضاءة استوديو.",
         sample_idea="حلقة بودكاست عن كيف تبني الانضباط الذاتي وتحقق أهدافك"
@@ -300,7 +306,7 @@ MODES: dict[str, Mode] = {
         voice="ar-SA-HamedNeural",
         voice_rate="-5%",
         vfilter="eq=contrast=1.28:saturation=0.68",
-        style_en="Dark psychological thriller cinematography, thick volumetric fog, eerie silhouettes under streetlamp, cold shadow grading",
+        style_en="Dark psychological thriller cinematography, thick volumetric fog, eerie silhouettes under streetlamp",
         pixabay_q="dark forest fog night mystery",
         desc_ar="قصص غموض وتشويق بفلاتر مظلمة وسرد صوتي مشوق.",
         sample_idea="لغز السفينة المختفية التي ظهرت فجأة وسط الضباب بعد 50 عاماً"
