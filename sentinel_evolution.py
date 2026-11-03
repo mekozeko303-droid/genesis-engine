@@ -710,7 +710,8 @@ def build_ass(text: str, duration: float) -> str:
     for p in phrases:
         d = span * len(p) / total
         safe = p.replace("{", "").replace("}", "").replace("\n", "\\N")
-        events.append(f"Dialogue: 0,{_ass_time(t)},{_ass_time(t + d)},Default,,0,0,0,,{safe}")
+        # RLE...PDF: يفرض اتجاه الكتابة من اليمين (libass يفترض LTR فتنقلب الجمل المختلطة بأرقام/إنجليزي)
+        events.append(f"Dialogue: 0,{_ass_time(t)},{_ass_time(t + d)},Default,,0,0,0,,\u202b{safe}\u202c")
         t += d
     return (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: %d\nPlayResY: %d\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n"
@@ -776,6 +777,46 @@ class VideoProductionEngine:
         if Image is None:
             warn.append("Pillow غير مثبّت: لن تعمل صور FLUX وويكيميديا")
         return fatal, warn
+
+    async def diagnose(self) -> list[str]:
+        """فحص حيّ لكل خدمة (يُستخدم في /check وعند التشغيل) — يخبرك أي مفتاح لا يعمل بالضبط."""
+        L: list[str] = []
+        code, _, _ = await run_cmd("ffmpeg", "-version", timeout=15)
+        L.append(("✅" if code == 0 else "❌") + " FFmpeg")
+        L.append(("✅" if self.has_subtitles_filter else "⚠️") + " ترجمة محروقة (libass)")
+        tmp = config.WORK_DIR / "diag.mp3"
+        try:
+            d = await self.voice.synth("اختبار الصوت العربي", tmp, config.MODES["documentary"])
+            L.append(f"✅ التعليق الصوتي ({d:.1f}ث)")
+        except Exception as e:
+            L.append("❌ التعليق الصوتي: " + str(getattr(e, "user_message", e))[:70])
+        finally:
+            tmp.unlink(missing_ok=True)
+        if not config.PIXABAY_KEYS:
+            L.append("❌ Pixabay: لا يوجد مفتاح")
+        for i, key in enumerate(config.PIXABAY_KEYS, 1):
+            try:
+                r = await self.http.get("https://pixabay.com/api/videos/", timeout=20,
+                                        params={"key": key, "q": "nature", "per_page": 3})
+                L.append(f"✅ Pixabay مفتاح {i}" if r.status_code == 200 else f"❌ Pixabay مفتاح {i}: HTTP {r.status_code}")
+            except Exception as e:
+                L.append(f"❌ Pixabay مفتاح {i}: {str(e)[:50]}")
+        if not config.HF_TOKENS:
+            L.append("❌ HuggingFace: لا يوجد توكن")
+        for i, tok in enumerate(config.HF_TOKENS, 1):
+            try:
+                r = await self.http.get("https://huggingface.co/api/whoami-v2", timeout=20,
+                                        headers={"Authorization": f"Bearer {tok}"})
+                if r.status_code == 200:
+                    L.append(f"✅ HuggingFace توكن {i}")
+                else:
+                    hint = " — التوكن الصحيح يبدأ بـ hf_" if r.status_code == 401 and not tok.startswith("hf_") else ""
+                    L.append(f"❌ HuggingFace توكن {i}: HTTP {r.status_code}{hint}")
+            except Exception as e:
+                L.append(f"❌ HuggingFace توكن {i}: {str(e)[:50]}")
+        ok, msg = await self.db.remote_check()
+        L.append(("✅" if ok else "⚠️") + f" Supabase: {msg}")
+        return L
 
     async def close(self) -> None:
         if self.http:
@@ -912,7 +953,8 @@ class VideoProductionEngine:
         return await ffmpeg(
             *inputs, "-i", sc.audio_path, "-map", "0:v:0", "-map", "1:a:0", "-vf", vf,
             "-af", "aresample=44100,apad", "-t", f"{D:.3f}",
-            "-c:v", "libx264", "-preset", config.X264_PRESET, "-crf", "23", "-r", str(FPS), "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", "-preset", config.X264_PRESET, "-crf", "23", "-maxrate", "5M", "-bufsize", "10M",
+            "-r", str(FPS), "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "160k", "-ac", "2", out, cwd=ctx.dir)
 
     async def _render_scene(self, idx: int, sc: Scene, ctx: JobCtx, hub: AssetHub) -> Path:
