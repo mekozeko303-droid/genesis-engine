@@ -7,6 +7,7 @@ Genesis Cinema Studio — config.py
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,6 +73,9 @@ except ValueError:
 API_HASH = _first("API_HASH", "TELEGRAM_API_HASH")
 BOT_TOKEN = _first("BOT_TOKEN", "TELEGRAM_BOT_TOKEN")
 ADMIN_IDS = {int(x) for x in _s("ADMIN_IDS").replace(" ", "").split(",") if x.isdigit()}
+# الوضع الخاص: عند تفعيله لا يستخدم البوت إلا المشرفون. يتفعّل تلقائياً إذا ضبطت ADMIN_IDS،
+# وللفتح للجميع ضع PRIVATE_MODE=0. (لا يُفعَّل أبداً بلا مشرفين حتى لا تُقفل على نفسك)
+PRIVATE_MODE = _b("PRIVATE_MODE", True) and bool(ADMIN_IDS)
 
 # ───────────────────────── المفاتيح المجانية ─────────────────────────
 # يدعم حتى مفتاحين لكل خدمة (حسابان): عند استنفاد الأول أو تحديد المعدل يتبدّل البوت للثاني تلقائياً.
@@ -83,7 +87,7 @@ PIXABAY_KEY = PIXABAY_KEYS[0] if PIXABAY_KEYS else ""
 HF_TOKEN = HF_TOKENS[0] if HF_TOKENS else ""
 
 # ───────────────────────── Supabase (اختياري — نسخ احتياطي للذاكرة) ─────────────────────────
-SUPABASE_URL = _s("SUPABASE_URL").rstrip("/")
+SUPABASE_URL = re.sub(r"/rest/v1/?$", "", _s("SUPABASE_URL").rstrip("/"))   # يتجاهل /rest/v1 إن أُضيف بالخطأ
 SUPABASE_KEY = _first("SUPABASE_KEY", "SUPABASE_SECRET_KEY")
 SUPABASE_TABLE = _s("SUPABASE_TABLE", "genesis_state")
 
@@ -125,11 +129,11 @@ def missing_required() -> list[str]:
     """المتغيرات الإلزامية الناقصة لتشغيل البوت."""
     out = []
     if not API_ID:
-        out.append("API_ID")
+        out.append("TELEGRAM_API_ID")
     if not API_HASH:
-        out.append("API_HASH")
+        out.append("TELEGRAM_API_HASH")
     if not BOT_TOKEN:
-        out.append("BOT_TOKEN")
+        out.append("TELEGRAM_BOT_TOKEN")
     return out
 
 
@@ -166,7 +170,7 @@ MODES: dict[str, Mode] = {m.id: m for m in (
        "قصص تاريخية ملحمية مبنية على وقائع موثّقة.",
        "epic yet factual storyteller; chronological; grounded strictly in documented history",
        "historical epic cinematic still, golden hour, dusty atmosphere, period-accurate architecture and costumes, warm sepia grade",
-       "eq=contrast=1.1:saturation=0.85,colorbalance=rs=0.08:gs=0.02:bs=-0.1,vignette=PI/4.5,noise=alls=8:allf=t",
+       "eq=contrast=1.1:saturation=0.85,colorbalance=rs=0.08:gs=0.02:bs=-0.1,vignette=PI/4.5,noise=alls=6:allf=t",
        0.35, ("ancient ruins", "old city"),
        "قصة سقوط الأندلس وآخر أيام غرناطة"),
     _M("mystery", "🕵️", "ألغاز وغموض", "Mystery",
@@ -181,7 +185,7 @@ MODES: dict[str, Mode] = {m.id: m for m in (
        "رعب نفسي بطيء بدون دماء، جمل قصيرة وتوتر متصاعد.",
        "dark, slow creeping dread; short sentences; psychological horror; absolutely no gore",
        "horror cinematic still, dark atmosphere, thick fog, a single practical light source, desaturated, grainy, unsettling but not gory",
-       "eq=contrast=1.2:saturation=0.6:brightness=-0.07,colorbalance=gs=0.05:bs=0.03,vignette=PI/3.2,noise=alls=14:allf=t",
+       "eq=contrast=1.2:saturation=0.6:brightness=-0.07,colorbalance=gs=0.05:bs=0.03,vignette=PI/3.2,noise=alls=8:allf=t",
        0.30, ("dark forest night", "abandoned house"),
        "قصة البيت المهجور الذي يسمع زواره خطوات كل ليلة",
        voice_rate="-6%", motion=0.16),
@@ -241,14 +245,14 @@ MODES: dict[str, Mode] = {m.id: m for m in (
        "قضايا غامضة وتحقيقات (بدون مشاهد عنف).",
        "gripping investigative narration; facts first; tasteful, never graphic; no real victims' faces",
        "gritty crime drama cinematic still, night, rain, neon reflections, desaturated, high contrast, no gore",
-       "eq=contrast=1.2:saturation=0.7:brightness=-0.05,colorbalance=gs=0.04:bs=0.05,vignette=PI/3.5,noise=alls=10:allf=t",
+       "eq=contrast=1.2:saturation=0.7:brightness=-0.05,colorbalance=gs=0.04:bs=0.05,vignette=PI/3.5,noise=alls=7:allf=t",
        0.35, ("night city rain", "police lights"),
        "قضية الجريمة الكاملة التي كشفها دليل صغير"),
     _M("epic", "⚔️", "ملاحم ومعارك", "Epic battles",
        "معارك وملاحم تاريخية بأسلوب سينمائي (بدون دماء).",
        "grand, rousing war-epic narration; strategy and turning points; never graphic",
        "epic war film cinematic still, dramatic stormy sky, dust and smoke, vast battlefield scenery, no gore, bronze grade",
-       "eq=contrast=1.18:saturation=0.8,colorbalance=rs=0.06:bs=-0.08,vignette=PI/4,noise=alls=8:allf=t",
+       "eq=contrast=1.18:saturation=0.8,colorbalance=rs=0.06:bs=-0.08,vignette=PI/4,noise=alls=6:allf=t",
        0.20, ("storm clouds", "castle fortress"),
        "معركة حطين: كيف غيّر صلاح الدين مجرى التاريخ؟",
        voice_rate="-2%"),
@@ -286,6 +290,17 @@ MODES: dict[str, Mode] = {m.id: m for m in (
 
 assert len(MODES) == 17, "يجب أن يكون عدد الأوضاع 17"
 MODE_ORDER = list(MODES.keys())
+
+# أزرار التجربة السريعة (تمر على خط الإنتاج الحقيقي كاملاً: سيناريو + صوت + لقطات + مونتاج)
+QUICK_DEMOS = [
+    ("🇾🇪 تجربة: اليمن السعيد", "travel",
+     "جمال الطبيعة والعمارة التاريخية في صنعاء القديمة وجزيرة سقطرى في اليمن"),
+    ("🥤 تجربة: المشروبات الغازية", "science",
+     "ماذا تفعل المشروبات الغازية بجسمك؟ حقائق علمية مبسّطة"),
+    ("⚽ تجربة: قصة لاعب", "sports",
+     "قصة لاعب كرة قدم صعد من حيّ فقير إلى نجومية العالم"),
+]
+assert all(m in MODES for _, m, _ in QUICK_DEMOS)
 
 
 # ═════════════════════════ القفل الجغرافي (Strict Geo-Lock) ═════════════════════════
