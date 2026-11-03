@@ -1,71 +1,25 @@
-name: Genesis Cinema Studio
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: "*/30 * * * *"
-
-# لا تشغّل نسختين من البوت بالتوكن نفسه في الوقت ذاته.
-concurrency:
-  group: genesis-bot
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
-
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 350
-    steps:
-      - name: تنزيل المستودع
-        uses: actions/checkout@v4
-
-      - name: إعداد Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements.txt
-
-      - name: تثبيت FFmpeg والخط العربي
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg fonts-noto-core
-
-      - name: تثبيت مكتبات Python
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: فحص الملفات والأسرار الأساسية
-        env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: |
-          python - <<'PY'
-          import config
-          missing = config.missing_required()
-          if missing:
-              raise SystemExit("Missing/invalid required GitHub Secrets: " + ", ".join(missing))
-          print("Configuration checks passed. Secret values are not printed.")
-          PY
-
       - name: تشغيل البوت
         env:
           PYTHONUNBUFFERED: "1"
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || secrets.BOT_TOKEN }}
+
+          API_ID: ${{ secrets.API_ID || secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.API_HASH || secrets.TELEGRAM_API_HASH }}
+
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+
           PIXABAY_KEY: ${{ secrets.PIXABAY_KEY }}
           PIXABAY_KEY_2: ${{ secrets.PIXABAY_KEY_2 }}
+
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_TOKEN_2: ${{ secrets.HF_TOKEN_2 }}
+
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
           FONT_FAMILY: "Noto Sans Arabic"
           MAX_RUN_MINUTES: "335"
           PRIVATE_MODE: "1"
+
         run: python main.py
