@@ -1,268 +1,144 @@
 # -*- coding: utf-8 -*-
-"""
-Genesis Cinema Studio — database.py
-الذاكرة الدائمة: وضع كل مستخدم، الحصة اليومية، فيديوهات الأمثلة (file_id)،
-والمقاطع المستخدمة سابقاً (لمنع التكرار). تُحفظ في ملف JSON بكتابة آمنة (atomic)،
-مع نسخة احتياطية اختيارية في Supabase.
-
-جدول Supabase (نفّذ مرة واحدة في SQL Editor إن أردت النسخ الاحتياطي):
-    create table if not exists genesis_state (
-        id text primary key,
-        data jsonb not null,
-        updated_at timestamptz default now()
-    );
-"""
-from __future__ import annotations
-
-import asyncio
+import datetime
 import json
 import logging
-import os
-import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
-import httpx
-
+import requests
 import config
 
 log = logging.getLogger("genesis.db")
 
-_MAX_USED_ASSETS = 400   # نتذكر آخر 400 مقطع لكل مصدر لمنع إعادة استخدامها
-_MAX_HISTORY = 200
-
-
-def _default() -> dict:
-    return {
-        "version": 1,
-        "users": {},
-        "assets": {"pixabay": [], "wikimedia": []},
-        "samples": {},
-        "history": [],
-        "stats": {"videos": 0, "failures": 0},
-    }
-
 
 class Database:
-    def __init__(self, path: Path = config.DB_PATH):
-        self.path = Path(path)
-        self.data: dict = _default()
-        self._lock = asyncio.Lock()
-        self._used: dict[str, set] = {}
+    def __init__(self):
+        self.file_path: Path = config.DATA_DIR / "studio_state.json"
+        self.data: dict[str, Any] = {
+            "users": {},
+            "samples": {},
+            "stats": {"videos": 0, "failures": 0},
+        }
+        self._supa_url = config.SUPABASE_URL.rstrip("/")
+        self._supa_key = config.SUPABASE_KEY
 
-    # ───────────────────────── تحميل / حفظ ─────────────────────────
     async def load(self) -> None:
-        loaded: Optional[dict] = None
-        if self.path.exists():
+        if self.file_path.exists():
             try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
-            except Exception as e:  # ملف تالف → نحتفظ به باسم آخر ونبدأ نظيفاً
-                bad = self.path.with_suffix(f".corrupt-{int(time.time())}.json")
-                try:
-                    self.path.rename(bad)
-                except OSError:
-                    pass
-                log.error("ملف الذاكرة تالف (%s) — نُقل إلى %s", e, bad.name)
-        if loaded is None:
-            loaded = await self._remote_pull()
-        if isinstance(loaded, dict):
-            base = _default()
-            base.update(loaded)
-            for k, v in _default().items():
-                base.setdefault(k, v)
-            self.data = base
-        self._rebuild_used()
-        log.info("الذاكرة جاهزة: %d مستخدم", len(self.data["users"]))
+                self.data = json.loads(self.file_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                log.warning("تعذر قراءة ملف الذاكرة المحلي: %s", e)
 
-    def _rebuild_used(self) -> None:
-        self._used = {k: set(v) for k, v in self.data.get("assets", {}).items()}
-
-    def _write_atomic(self, text: str) -> None:
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, self.path)
-
-    async def save(self, remote: bool = False) -> None:
-        async with self._lock:
-            text = json.dumps(self.data, ensure_ascii=False)
+        # جلب الأمثلة المثبتة من Supabase إن وجدت
+        if self._supa_url and self._supa_key:
             try:
-                await asyncio.to_thread(self._write_atomic, text)
-            except Exception:
-                log.exception("تعذّر حفظ الذاكرة محلياً")
-        if remote:
-            await self._remote_push()
+                r = requests.get(
+                    f"{self._supa_url}/rest/v1/mode_samples?select=mode_id,file_id",
+                    headers={"apikey": self._supa_key, "Authorization": f"Bearer {self._supa_key}"},
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    for row in r.json():
+                        mid = row.get("mode_id")
+                        fid = row.get("file_id")
+                        if mid and fid:
+                            self.data.setdefault("samples", {})[mid] = {"file_id": fid, "path": ""}
+            except Exception as e:
+                log.warning("تعذر جلب الأمثلة من Supabase: %s", e)
 
     async def flush(self) -> None:
-        await self.save(remote=True)
-
-    # ───────────────────────── Supabase (اختياري) ─────────────────────────
-    def _remote_enabled(self) -> bool:
-        return bool(config.SUPABASE_URL and config.SUPABASE_KEY)
-
-    def _remote_headers(self) -> dict:
-        h = {"apikey": config.SUPABASE_KEY, "Content-Type": "application/json"}
-        # المفاتيح الجديدة (sb_secret_...) ليست JWT: تُرسل في apikey فقط. القديمة (eyJ...) تُرسل في الاثنين.
-        if config.SUPABASE_KEY.startswith("eyJ"):
-            h["Authorization"] = f"Bearer {config.SUPABASE_KEY}"
-        return h
-
-    async def remote_check(self) -> tuple[bool, str]:
-        """فحص اتصال Supabase والجدول. يرجع (نجح؟، رسالة)."""
-        if not self._remote_enabled():
-            return False, "غير مفعّل (SUPABASE_URL أو SUPABASE_SECRET_KEY ناقص)"
         try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}",
-                                params={"select": "id", "limit": 1}, headers=self._remote_headers())
+            self.file_path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:
-            return False, f"تعذّر الوصول للرابط: {str(e)[:60]}"
-        if r.status_code == 200:
-            return True, "متصل والجدول موجود"
-        hint = {401: "المفتاح غير صحيح", 403: "المفتاح غير صحيح أو بلا صلاحية",
-                404: f"الجدول {config.SUPABASE_TABLE} غير موجود — نفّذ أمر SQL"}.get(r.status_code, r.text[:70])
-        return False, f"HTTP {r.status_code}: {hint}"
+            log.warning("تعذر حفظ الذاكرة المحلية: %s", e)
 
-    async def _remote_pull(self) -> Optional[dict]:
-        if not self._remote_enabled():
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(
-                    f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}",
-                    params={"id": "eq.state", "select": "data"},
-                    headers=self._remote_headers(),
-                )
-            if r.status_code == 200 and r.json():
-                log.info("تمت استعادة الذاكرة من Supabase")
-                return r.json()[0]["data"]
-        except Exception as e:
-            log.warning("فشل سحب Supabase: %s", e)
-        return None
+    def _today(self) -> str:
+        return datetime.date.today().isoformat()
 
-    async def _remote_push(self) -> None:
-        if not self._remote_enabled():
-            return
-        try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.post(
-                    f"{config.SUPABASE_URL}/rest/v1/{config.SUPABASE_TABLE}",
-                    params={"on_conflict": "id"},
-                    headers={**self._remote_headers(), "Prefer": "resolution=merge-duplicates"},
-                    content=json.dumps({"id": "state", "data": self.data}, ensure_ascii=False).encode("utf-8"),
-                )
-            if r.status_code >= 300:
-                log.warning("Supabase رفض الحفظ: %s %s", r.status_code, r.text[:120])
-        except Exception as e:
-            log.warning("فشل دفع Supabase: %s", e)
-
-    # ───────────────────────── المستخدمون ─────────────────────────
-    @staticmethod
-    def _today() -> str:
-        tz = timezone(timedelta(hours=config.TZ_OFFSET_HOURS))
-        return datetime.now(tz).strftime("%Y-%m-%d")
-
-    def user(self, uid: int) -> dict:
-        key = str(uid)
-        u = self.data["users"].get(key)
-        if u is None:
-            u = {"mode": None, "pending": None, "name": "", "total": 0,
-                 "daily": {"date": "", "count": 0}, "first_seen": int(time.time())}
-            self.data["users"][key] = u
+    def user(self, uid: int) -> dict[str, Any]:
+        u = self.data.setdefault("users", {}).setdefault(
+            str(uid),
+            {"mode": "fasso", "duration": 60, "name": "", "pending": "", "day": self._today(), "used": 0},
+        )
+        if u.get("day") != self._today():
+            u["day"] = self._today()
+            u["used"] = 0
+        u.setdefault("duration", 60)
         return u
 
-    def get_mode(self, uid: int) -> Optional[str]:
-        m = self.user(uid).get("mode")
-        return m if m in config.MODES else None
+    def get_mode(self, uid: int) -> str:
+        m = self.user(uid).get("mode", "fasso")
+        return m if m in config.MODES else "fasso"
 
     async def set_mode(self, uid: int, mode_id: str, name: str = "") -> None:
         u = self.user(uid)
         u["mode"] = mode_id
         if name:
-            u["name"] = name[:40]
-        await self.save()
+            u["name"] = name
+        await self.flush()
 
-    async def set_pending(self, uid: int, idea: Optional[str]) -> None:
-        self.user(uid)["pending"] = idea
-        await self.save()
+    def get_duration(self, uid: int) -> int:
+        return int(self.user(uid).get("duration", 60))
 
-    async def pop_pending(self, uid: int) -> Optional[str]:
+    async def set_duration(self, uid: int, seconds: int) -> None:
         u = self.user(uid)
-        idea = u.get("pending")
-        if idea:
-            u["pending"] = None
-            await self.save()
-        return idea
+        u["duration"] = int(seconds)
+        await self.flush()
 
-    def used_today(self, uid: int) -> int:
-        d = self.user(uid)["daily"]
-        return d["count"] if d.get("date") == self._today() else 0
+    async def set_pending(self, uid: int, idea: str) -> None:
+        self.user(uid)["pending"] = idea
+        await self.flush()
+
+    async def pop_pending(self, uid: int) -> str:
+        u = self.user(uid)
+        val = u.get("pending", "")
+        u["pending"] = ""
+        await self.flush()
+        return val
+
+    def get_sample(self, mode_id: str) -> dict[str, str] | None:
+        return self.data.get("samples", {}).get(mode_id)
+
+    async def set_sample(self, mode_id: str, path: str, file_id: str) -> None:
+        self.data.setdefault("samples", {})[mode_id] = {"path": path, "file_id": file_id}
+        await self.flush()
+        if self._supa_url and self._supa_key and file_id:
+            try:
+                requests.post(
+                    f"{self._supa_url}/rest/v1/mode_samples",
+                    headers={
+                        "apikey": self._supa_key,
+                        "Authorization": f"Bearer {self._supa_key}",
+                        "Content-Type": "application/json",
+                        "Prefer": "resolution=merge-duplicates",
+                    },
+                    json={"mode_id": mode_id, "file_id": file_id},
+                    timeout=8,
+                )
+            except Exception:
+                pass
 
     def remaining_quota(self, uid: int, is_admin: bool = False) -> int:
         if is_admin:
             return 999
-        return max(0, config.DAILY_LIMIT - self.used_today(uid))
-
-    # ───────────────────────── السجل والإحصاءات ─────────────────────────
-    async def record_success(self, uid: int, mode_id: str, idea: str, title: str, clip_ids: dict[str, list[str]]) -> None:
         u = self.user(uid)
-        today = self._today()
-        if u["daily"].get("date") != today:
-            u["daily"] = {"date": today, "count": 0}
-        u["daily"]["count"] += 1
-        u["total"] = u.get("total", 0) + 1
-        self.data["stats"]["videos"] += 1
-        self._push_history({"ts": int(time.time()), "uid": uid, "mode": mode_id,
-                            "idea": idea[:160], "ok": True, "title": title[:80]})
-        for kind, ids in clip_ids.items():
-            self._mark_used(kind, ids)
-        await self.save(remote=True)
+        return max(0, config.DAILY_LIMIT - int(u.get("used", 0)))
+
+    async def record_success(self, uid: int, mode_id: str, idea: str, title: str, used_assets: list[str]) -> None:
+        u = self.user(uid)
+        u["used"] = int(u.get("used", 0)) + 1
+        self.data.setdefault("stats", {})["videos"] = int(self.data["stats"].get("videos", 0)) + 1
+        await self.flush()
 
     async def record_failure(self, uid: int, mode_id: str, idea: str, reason: str) -> None:
-        self.data["stats"]["failures"] += 1
-        self._push_history({"ts": int(time.time()), "uid": uid, "mode": mode_id,
-                            "idea": idea[:160], "ok": False, "reason": reason[:160]})
-        await self.save()
+        self.data.setdefault("stats", {})["failures"] = int(self.data["stats"].get("failures", 0)) + 1
+        await self.flush()
 
-    def _push_history(self, item: dict) -> None:
-        h = self.data["history"]
-        h.append(item)
-        del h[:-_MAX_HISTORY]
-
-    def stats(self) -> dict:
-        s = dict(self.data["stats"])
-        s["users"] = len(self.data["users"])
-        s["samples"] = len(self.data["samples"])
-        return s
-
-    # ───────────────────────── منع تكرار المقاطع ─────────────────────────
-    def is_asset_used(self, kind: str, ref: str) -> bool:
-        return str(ref) in self._used.get(kind, set())
-
-    def _mark_used(self, kind: str, refs) -> None:
-        lst = self.data["assets"].setdefault(kind, [])
-        for r in refs:
-            r = str(r)
-            if r not in lst:
-                lst.append(r)
-        del lst[:-_MAX_USED_ASSETS]
-        self._used[kind] = set(lst)
-
-    # ───────────────────────── فيديوهات الأمثلة ─────────────────────────
-    def get_sample(self, mode_id: str) -> Optional[dict]:
-        """يرجع {"file_id":..., "path":...} أو None.
-        الأولوية: (1) فيديو ثبّته المشرف يدوياً (file_id) ← (2) ملف data/samples/<mode>.mp4 ← (3) آخر مثال مبني."""
-        rec = self.data["samples"].get(mode_id, {})
-        file_id = rec.get("file_id")
-        if rec.get("pinned") and file_id:
-            return {"file_id": file_id, "path": None}
-        manual = config.SAMPLES_DIR / f"{mode_id}.mp4"
-        if manual.exists() and manual.stat().st_size > 1024:
-            return {"file_id": file_id if rec.get("path") == str(manual) else None, "path": str(manual)}
-        if file_id:
-            return {"file_id": file_id, "path": None}
-        return None
-
-    async def set_sample(self, mode_id: str, path: Optional[str], file_id: Optional[str], pinned: bool = False) -> None:
-        self.data["samples"][mode_id] = {"path": path, "file_id": file_id, "pinned": pinned, "ts": int(time.time())}
-        await self.save(remote=True)
+    def stats(self) -> dict[str, int]:
+        st = self.data.get("stats", {})
+        return {
+            "videos": int(st.get("videos", 0)),
+            "failures": int(st.get("failures", 0)),
+            "users": len(self.data.get("users", {})),
+            "samples": len(self.data.get("samples", {})),
+        }
